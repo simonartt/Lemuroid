@@ -25,10 +25,13 @@ import com.swordfish.lemuroid.app.shared.settings.ControllerConfigsManager
 import com.swordfish.lemuroid.app.shared.settings.HapticFeedbackMode
 import com.swordfish.lemuroid.common.longAnimationDuration
 import com.swordfish.lemuroid.lib.controller.ControllerConfig
+import com.swordfish.lemuroid.lib.core.CoreVariable
 import com.swordfish.lemuroid.lib.core.CoreVariablesManager
 import com.swordfish.lemuroid.lib.game.GameLoader
 import com.swordfish.lemuroid.lib.library.GameSystem
 import com.swordfish.lemuroid.lib.library.SystemCoreConfig
+import com.swordfish.lemuroid.lib.library.CoreID
+import com.swordfish.lemuroid.lib.library.SystemID
 import com.swordfish.lemuroid.lib.library.db.entity.Game
 import com.swordfish.lemuroid.lib.saves.SavesManager
 import com.swordfish.lemuroid.lib.saves.StatesManager
@@ -50,8 +53,8 @@ class BaseGameScreenViewModel(
     settingsManager: SettingsManager,
     inputDeviceManager: InputDeviceManager,
     controllerConfigsManager: ControllerConfigsManager,
-    system: GameSystem,
-    systemCoreConfig: SystemCoreConfig,
+    private val system: GameSystem,
+    private val systemCoreConfig: SystemCoreConfig,
     sharedPreferences: SharedPreferences,
     savesManager: SavesManager,
     statesManager: StatesManager,
@@ -127,6 +130,7 @@ class BaseGameScreenViewModel(
             tilt,
             sideEffects,
             viewModelScope,
+            swapScreensCallback = { swapNdsScreens() },
         )
     private val saves =
         GameViewModelSaves(
@@ -271,6 +275,33 @@ class BaseGameScreenViewModel(
         Timber.d("Loading quick save")
         retroGameView.retroGameView?.apply {
             frameSpeed = if (frameSpeed == 1) 2 else 1
+        }
+    }
+
+    private val ndsScreenSwapped = MutableStateFlow(false)
+
+    private fun swapNdsScreens() {
+        if (system.id != SystemID.NDS) return
+
+        ndsScreenSwapped.value = !ndsScreenSwapped.value
+        val swapped = ndsScreenSwapped.value
+
+        when (systemCoreConfig.coreID) {
+            CoreID.MELONDS -> {
+                val layoutValue = if (swapped) "bottom-top" else "top-bottom"
+                Timber.i("Swapping MelonDS screens to layout: $layoutValue")
+                retroGameView.retroGameView?.updateVariables(
+                    com.swordfish.libretrodroid.Variable("melonds_screen_layout1", layoutValue),
+                )
+            }
+            CoreID.DESMUME -> {
+                val layoutValue = if (swapped) "bottom/top" else "top/bottom"
+                Timber.i("Swapping DeSmuME screens to layout: $layoutValue")
+                retroGameView.retroGameView?.updateVariables(
+                    com.swordfish.libretrodroid.Variable("desmume_screens_layout", layoutValue),
+                )
+            }
+            else -> {}
         }
     }
 

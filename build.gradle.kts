@@ -17,9 +17,9 @@ plugins {
     id("com.github.ben-manes.versions") version "0.51.0"
     id("org.jetbrains.kotlin.plugin.serialization") version "1.4.0"
     id("org.jlleitschuh.gradle.ktlint") version "12.1.0"
-    id("com.android.test") version "8.7.1" apply false
+    // id("com.android.test") version "8.4.0" apply false  // Commented out due to resolution issues, not needed for app build
     id("org.jetbrains.kotlin.android") version deps.versions.kotlin apply false
-    id("androidx.baselineprofile") version "1.2.4" apply false
+    // id("androidx.baselineprofile") version "1.2.4" apply false
     id("com.android.application") version "8.4.0" apply false
     id("org.jetbrains.kotlin.plugin.compose") version deps.versions.kotlin apply false
 }
@@ -27,6 +27,8 @@ plugins {
 allprojects {
     repositories {
         mavenLocal()
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
         google()
         mavenCentral()
         maven { setUrl("https://jitpack.io") }

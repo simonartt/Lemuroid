@@ -2,8 +2,12 @@
 
 pluginManagement {
     repositories {
-        gradlePluginPortal()
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
         google()
+        mavenCentral()
+        gradlePluginPortal()
     }
 }
 
@@ -15,8 +19,8 @@ include(
     ":lemuroid-metadata-libretro-db",
     ":lemuroid-app-ext-free",
     ":lemuroid-app-ext-play",
-    ":bundled-cores",
-    ":baselineprofile"
+    ":bundled-cores"
+    // ":baselineprofile"
 )
 
 project(":bundled-cores").projectDir = File("lemuroid-cores/bundled-cores")

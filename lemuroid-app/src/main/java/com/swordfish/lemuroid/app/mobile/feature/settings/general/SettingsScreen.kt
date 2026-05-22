@@ -151,6 +151,17 @@ private fun GeneralSettings() {
             title = { Text(text = stringResource(id = R.string.settings_title_immersive_mode)) },
             subtitle = { Text(text = stringResource(id = R.string.settings_description_immersive_mode)) },
         )
+        LemuroidSettingsList(
+            state =
+                indexPreferenceState(
+                    R.string.pref_key_game_view_vertical_align,
+                    "center",
+                    stringListResource(R.array.pref_key_game_view_vertical_align_values).toList(),
+                ),
+            title = { Text(text = stringResource(id = R.string.settings_title_game_view_vertical_align)) },
+            subtitle = { Text(text = stringResource(id = R.string.settings_description_game_view_vertical_align)) },
+            items = stringListResource(R.array.pref_key_game_view_vertical_align_display_names),
+        )
         LemuroidSettingsSwitch(
             state = hdMode,
             title = { Text(text = stringResource(id = R.string.settings_title_hd_mode)) },

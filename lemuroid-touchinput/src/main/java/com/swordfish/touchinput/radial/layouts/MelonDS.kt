@@ -1,8 +1,6 @@
 package com.swordfish.touchinput.radial.layouts
 
 import android.view.KeyEvent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
@@ -81,7 +79,11 @@ fun PadKitScope.MelonDSRight(
             SecondaryButtonR()
             SecondaryButtonStart(position = 2)
             SecondaryButtonMenu(settings)
-            Box(modifier = Modifier.fillMaxSize().radialPosition(-120f))
+            LemuroidControlButton(
+                modifier = Modifier.radialPosition(-120f),
+                id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
+                icon = R.drawable.button_swap_screens,
+            )
         },
     )
 }

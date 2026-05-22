@@ -40,6 +40,22 @@
     <string name="settings_title_immersive_mode">Immersive mode</string>
     <string name="settings_description_immersive_mode">Dynamically colors the background based on game visuals</string>
 
+    <string name="settings_title_game_view_vertical_align">Game screen vertical alignment</string>
+    <string name="settings_description_game_view_vertical_align">Align the game screen to the top when using an external controller</string>
+
+    <string-array translatable="false" name="pref_key_game_view_vertical_align_values">
+        <item>center</item>
+        <item>top</item>
+    </string-array>
+
+    <string-array translatable="false" name="pref_key_game_view_vertical_align_display_names">
+        <item>@string/game_view_align_center</item>
+        <item>@string/game_view_align_top</item>
+    </string-array>
+
+    <string name="game_view_align_center">Center</string>
+    <string name="game_view_align_top">Top</string>
+
     <string name="settings_title_gamepad_settings">External devices</string>
     <string name="settings_description_gamepad_settings">Configure external gamepads and keyboards</string>
 

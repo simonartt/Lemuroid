@@ -48,6 +48,9 @@ class SettingsManager(private val context: Context, sharedPreferences: Lazy<Shar
 
     suspend fun enableImmersiveMode() = booleanPreference(R.string.pref_key_enable_immersive_mode, false)
 
+    suspend fun gameViewVerticalAlign() =
+        stringPreference(R.string.pref_key_game_view_vertical_align, "center")
+
     suspend fun cacheSizeBytes() =
         stringPreference(
             R.string.pref_key_max_cache_size,

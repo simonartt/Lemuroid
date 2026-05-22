@@ -13,13 +13,17 @@ object GameScreenLayout {
     const val CONSTRAINTS_GAME_VIEW = "gameView"
     const val CONSTRAINTS_GAME_CONTAINER = "gameContainer"
 
+    enum class VerticalAlign { CENTER, TOP }
+
     fun buildConstraintSet(
         isLandscape: Boolean,
         allowTouchOverlay: Boolean,
+        verticalAlign: VerticalAlign = VerticalAlign.CENTER,
     ): ConstraintSet {
         return when {
             !isLandscape -> buildConstraintSetPortrait()
             allowTouchOverlay -> buildConstraintSetLandscape()
+            verticalAlign == VerticalAlign.TOP -> buildConstraintSetLandscapeTopAlign()
             else -> buildConstraintSetLandscapeNoOverlay()
         }
     }
@@ -151,6 +155,66 @@ object GameScreenLayout {
                 top.linkTo(parent.top)
                 bottom.linkTo(parent.bottom)
                 width = Dimension.wrapContent // Takes as much space as needed
+            }
+
+            constrain(gameContainer) {
+                absoluteLeft.linkTo(gameView.absoluteLeft)
+                absoluteRight.linkTo(gameView.absoluteRight)
+                top.linkTo(gameView.top)
+                bottom.linkTo(gameView.bottom)
+            }
+
+            constrain(leftContainer) {
+                absoluteLeft.linkTo(parent.absoluteLeft)
+                absoluteRight.linkTo(leftPad.absoluteRight)
+                top.linkTo(parent.top)
+                bottom.linkTo(parent.bottom)
+                width = Dimension.fillToConstraints
+                height = Dimension.fillToConstraints
+            }
+
+            constrain(rightContainer) {
+                absoluteRight.linkTo(parent.absoluteRight)
+                absoluteLeft.linkTo(rightPad.absoluteLeft)
+                top.linkTo(parent.top)
+                bottom.linkTo(parent.bottom)
+                width = Dimension.fillToConstraints
+                height = Dimension.fillToConstraints
+            }
+        }
+    }
+
+    private fun buildConstraintSetLandscapeTopAlign(): ConstraintSet {
+        return ConstraintSet {
+            val gameView = createRefFor(CONSTRAINTS_GAME_VIEW)
+            val leftPad = createRefFor(CONSTRAINTS_LEFT_PAD)
+            val rightPad = createRefFor(CONSTRAINTS_RIGHT_PAD)
+            val gameContainer = createRefFor(CONSTRAINTS_GAME_CONTAINER)
+            val leftContainer = createRefFor(CONSTRAINTS_LEFT_CONTAINER)
+            val rightContainer = createRefFor(CONSTRAINTS_RIGHT_CONTAINER)
+
+            // In top-align mode, gameView uses wrapContent height and anchors to top
+            constrain(leftPad) {
+                absoluteLeft.linkTo(parent.absoluteLeft)
+                top.linkTo(gameView.top)
+                bottom.linkTo(gameView.bottom)
+                width = Dimension.wrapContent
+            }
+
+            constrain(gameView) {
+                width = Dimension.fillToConstraints
+                height = Dimension.wrapContent
+                absoluteLeft.linkTo(leftPad.absoluteRight)
+                absoluteRight.linkTo(rightPad.absoluteLeft)
+                top.linkTo(parent.top)
+                width = Dimension.fillToConstraints
+            }
+
+            constrain(rightPad) {
+                absoluteRight.linkTo(parent.absoluteRight)
+                top.linkTo(gameView.top)
+                bottom.linkTo(gameView.bottom)
+                width = Dimension.wrapContent
             }
 
             constrain(gameContainer) {

@@ -154,6 +154,8 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                     GameScreenLayout.buildConstraintSet(
                         isLandscape,
                         currentControllerConfig?.allowTouchOverlay ?: true,
+                        verticalAlign = if (!touchControlsVisibleState.value && isLandscape)
+                            GameScreenLayout.VerticalAlign.TOP else GameScreenLayout.VerticalAlign.CENTER,
                     ),
             ) {
                 Box(

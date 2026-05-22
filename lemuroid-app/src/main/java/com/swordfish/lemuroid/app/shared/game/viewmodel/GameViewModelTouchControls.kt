@@ -43,6 +43,7 @@ class GameViewModelTouchControls(
     private val tilt: GameViewModelTilt,
     private val sideEffects: GameViewModelSideEffects,
     private val scope: CoroutineScope,
+    private val swapScreensCallback: (() -> Unit)? = null,
 ) : DefaultLifecycleObserver {
     private val touchControlId = MutableStateFlow(TouchControllerID.GB)
     private val screenOrientation = MutableStateFlow(TouchControllerSettingsManager.Orientation.PORTRAIT)
@@ -123,20 +124,41 @@ class GameViewModelTouchControls(
             onMenuPressed((menuEvent as InputEvent.Button).pressed)
         }
 
-        events.forEach { event ->
-            when (event) {
-                is InputEvent.Button -> {
-                    handleVirtualInputButton(event)
-                }
-
-                is InputEvent.DiscreteDirection -> {
-                    handleVirtualInputDirection(event.id, event.direction.x, -event.direction.y)
-                }
-
-                is InputEvent.ContinuousDirection -> {
-                    handleVirtualInputDirection(event.id, event.direction.x, -event.direction.y)
-                }
+        val swapEvent = events.firstOrNull { it is InputEvent.Button && it.id == KeyEvent.KEYCODE_BUTTON_THUMBR }
+        if (swapEvent != null) {
+            onSwapScreensPressed((swapEvent as InputEvent.Button).pressed)
+            // Remove swap button events from further processing
+            val filtered = events.filter { it !is InputEvent.Button || it.id != KeyEvent.KEYCODE_BUTTON_THUMBR }
+            events.forEach { event ->
+                if (filtered.contains(event)) processEvent(event)
             }
+            return
+        }
+
+        events.forEach { event ->
+            processEvent(event)
+        }
+    }
+
+    private fun processEvent(event: InputEvent) {
+        when (event) {
+            is InputEvent.Button -> {
+                handleVirtualInputButton(event)
+            }
+
+            is InputEvent.DiscreteDirection -> {
+                handleVirtualInputDirection(event.id, event.direction.x, -event.direction.y)
+            }
+
+            is InputEvent.ContinuousDirection -> {
+                handleVirtualInputDirection(event.id, event.direction.x, -event.direction.y)
+            }
+        }
+    }
+
+    private fun onSwapScreensPressed(pressed: Boolean) {
+        if (pressed) {
+            swapScreensCallback?.invoke()
         }
     }
 
