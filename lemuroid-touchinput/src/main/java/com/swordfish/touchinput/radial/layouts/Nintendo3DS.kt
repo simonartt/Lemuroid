@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
+import com.swordfish.touchinput.controller.R
+import com.swordfish.touchinput.radial.controls.LemuroidControlButton
 import com.swordfish.touchinput.radial.controls.LemuroidControlCross
 import com.swordfish.touchinput.radial.controls.LemuroidControlFaceButtons
 import com.swordfish.touchinput.radial.layouts.shared.ComposeTouchLayouts
@@ -16,6 +18,7 @@ import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonR
 import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonSelect
 import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonStart
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
+import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
 import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
 import gg.padkit.PadKitScope
 import gg.padkit.ids.Id
