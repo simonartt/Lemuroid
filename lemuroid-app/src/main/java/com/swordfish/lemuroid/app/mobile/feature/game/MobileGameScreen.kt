@@ -328,7 +328,7 @@ private fun MenuEditTouchControls(
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     ),
                 )
-                androidx.compose.material3.ExposedDropdownMenu(
+                androidx.compose.material3.DropdownMenu(
                     expanded = expanded.value,
                     onDismissRequest = { expanded.value = false },
                 ) {
@@ -358,7 +358,7 @@ private fun MenuEditTouchControls(
                     )
                 }
                 // Offset X
-                MenuEditTouchControlRow(Icons.AutoMirrored.Filled.ArrowBack, "水平", 0f) {
+                MenuEditTouchControlRow(Icons.Filled.ArrowBack, "水平", 0f) {
                     Slider(
                         value = bs.offsetX,
                         onValueChange = {
