@@ -81,12 +81,12 @@ fun PadKitScope.Nintendo3DSRight(
         secondaryDials = {
             TweakableButton(id = TouchButtonId.R, settings = settings) { mod -> SecondaryButtonR(modifier = mod) }
             TweakableButton(id = TouchButtonId.START, settings = settings) { mod -> SecondaryButtonStart(position = 2, modifier = mod) }
-            // THUMBR = 换屏按钮（3DS 专属）
+            // THUMBR = 右摇杆（3DS 专属）
             TweakableButton(id = TouchButtonId.THUMBR, settings = settings) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(+80f - 180f).radialScale(2.2f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
-                    icon = R.drawable.button_close_screen,
+                    icon = R.drawable.button_stick,
                 )
             }
             TweakableButton(id = TouchButtonId.L2, settings = settings) { mod ->

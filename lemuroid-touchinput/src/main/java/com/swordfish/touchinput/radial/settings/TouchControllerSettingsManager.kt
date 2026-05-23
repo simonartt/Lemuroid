@@ -24,8 +24,8 @@ class TouchControllerSettingsManager(private val sharedPreferences: SharedPrefer
     }
 
     enum class TouchButtonId(val label: String) {
-        DPAD("方向键"), L("L"), L2("麦克风"), SELECT("Select"), THUMBL("关屏"),
-        FACE("Y/X/A/B"), R("R"), START("Start"), MENU("菜单"), THUMBR("换屏")
+        DPAD("方向键"), L("L"), L2("麦克风/L2"), SELECT("Select"), THUMBL("左摇杆"),
+        FACE("Y/X/A/B"), R("R"), START("Start"), MENU("菜单"), THUMBR("右摇杆/换屏")
     }
 
     @Serializable
