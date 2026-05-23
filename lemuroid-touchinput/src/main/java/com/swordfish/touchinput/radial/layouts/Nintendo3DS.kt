@@ -40,7 +40,7 @@ fun PadKitScope.Nintendo3DSLeft(
             TweakableButton(TouchButtonId.SELECT, settings) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
             TweakableButton(TouchButtonId.MENU, settings) { mod -> SecondaryButtonMenuPlaceholder(settings, modifier = mod) }
             TweakableButton(TouchButtonId.THUMBL, settings) { mod ->
-                SecondaryAnalogLeft(modifier = mod)
+                Box(modifier = mod) { SecondaryAnalogLeft() }
             }
         },
     )
@@ -86,7 +86,9 @@ fun PadKitScope.Nintendo3DSRight(
                     icon = R.drawable.button_close_screen,
                 )
             }
-            TweakableButton(TouchButtonId.L2, settings) { mod -> SecondaryButtonMenu(settings, modifier = mod) }
+            TweakableButton(TouchButtonId.L2, settings) { mod ->
+                Box(modifier = mod) { SecondaryButtonMenu(settings) }
+            }
         },
     )
 }
