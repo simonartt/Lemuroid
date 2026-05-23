@@ -33,8 +33,8 @@ import kotlinx.collections.immutable.persistentMapOf
 fun PadKitScope.TweakableButtonDesmume(
     id: TouchButtonId,
     settings: TouchControllerSettingsManager.Settings,
-    content: @Composable (Modifier) -> Unit,
     modifier: Modifier = Modifier,
+    content: @Composable (Modifier) -> Unit,
 ) {
     val bs = settings.getButtonSettings(id)
     val onEditSelect = LocalButtonEdit.current
@@ -76,22 +76,22 @@ fun PadKitScope.DesmumeLeft(
         settings = settings,
         modifier = modifier,
         primaryDial = {
-            TweakableButtonDesmume(id = TouchButtonId.DPAD, settings = settings, modifier = Modifier) { mod ->
+            TweakableButtonDesmume(id = TouchButtonId.DPAD, settings = settings) { mod ->
                 LemuroidControlCross(modifier = mod, id = Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD))
             }
         },
         secondaryDials = {
-            TweakableButtonDesmume(id = TouchButtonId.L, settings = settings, modifier = Modifier) { mod -> SecondaryButtonL(modifier = mod) }
-            TweakableButtonDesmume(id = TouchButtonId.SELECT, settings = settings, modifier = Modifier) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
-            TweakableButtonDesmume(id = TouchButtonId.MENU, settings = settings, modifier = Modifier) { mod -> SecondaryButtonMenuPlaceholder(settings, modifier = mod) }
-            TweakableButtonDesmume(id = TouchButtonId.THUMBL, settings = settings, modifier = Modifier) { mod ->
+            TweakableButtonDesmume(id = TouchButtonId.L, settings = settings) { mod -> SecondaryButtonL(modifier = mod) }
+            TweakableButtonDesmume(id = TouchButtonId.SELECT, settings = settings) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
+            TweakableButtonDesmume(id = TouchButtonId.MENU, settings = settings) { mod -> SecondaryButtonMenuPlaceholder(settings, modifier = mod) }
+            TweakableButtonDesmume(id = TouchButtonId.THUMBL, settings = settings) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(-120f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBL),
                     icon = R.drawable.button_mic,
                 )
             }
-            TweakableButtonDesmume(id = TouchButtonId.L2, settings = settings, modifier = Modifier) { mod ->
+            TweakableButtonDesmume(id = TouchButtonId.L2, settings = settings) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(-60f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_L2),
@@ -111,7 +111,7 @@ fun PadKitScope.DesmumeRight(
         settings = settings,
         modifier = modifier,
         primaryDial = {
-            TweakableButtonDesmume(id = TouchButtonId.FACE, settings = settings, modifier = Modifier) { mod ->
+            TweakableButtonDesmume(id = TouchButtonId.FACE, settings = settings) { mod ->
                 LemuroidControlFaceButtons(
                     modifier = mod,
                     ids =
@@ -132,10 +132,10 @@ fun PadKitScope.DesmumeRight(
             }
         },
         secondaryDials = {
-            TweakableButtonDesmume(id = TouchButtonId.R, settings = settings, modifier = Modifier) { mod -> SecondaryButtonR(modifier = mod) }
-            TweakableButtonDesmume(id = TouchButtonId.START, settings = settings, modifier = Modifier) { mod -> SecondaryButtonStart(position = 2, modifier = mod) }
-            TweakableButtonDesmume(id = TouchButtonId.MENU, settings = settings, modifier = Modifier) { mod -> SecondaryButtonMenu(settings, modifier = mod) }
-            TweakableButtonDesmume(id = TouchButtonId.THUMBR, settings = settings, modifier = Modifier) { mod ->
+            TweakableButtonDesmume(id = TouchButtonId.R, settings = settings) { mod -> SecondaryButtonR(modifier = mod) }
+            TweakableButtonDesmume(id = TouchButtonId.START, settings = settings) { mod -> SecondaryButtonStart(position = 2, modifier = mod) }
+            TweakableButtonDesmume(id = TouchButtonId.MENU, settings = settings) { mod -> SecondaryButtonMenu(settings, modifier = mod) }
+            TweakableButtonDesmume(id = TouchButtonId.THUMBR, settings = settings) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(-120f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),

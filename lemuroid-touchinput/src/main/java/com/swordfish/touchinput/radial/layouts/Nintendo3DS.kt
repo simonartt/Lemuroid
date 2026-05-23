@@ -31,15 +31,15 @@ fun PadKitScope.Nintendo3DSLeft(
         settings = settings,
         modifier = modifier,
         primaryDial = {
-            TweakableButton(id = TouchButtonId.DPAD, settings = settings, modifier = Modifier) { mod ->
+            TweakableButton(id = TouchButtonId.DPAD, settings = settings) { mod ->
                 LemuroidControlCross(modifier = mod, id = Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD))
             }
         },
         secondaryDials = {
-            TweakableButton(id = TouchButtonId.L, settings = settings, modifier = Modifier) { mod -> SecondaryButtonL(modifier = mod) }
-            TweakableButton(id = TouchButtonId.SELECT, settings = settings, modifier = Modifier) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
-            TweakableButton(id = TouchButtonId.MENU, settings = settings, modifier = Modifier) { mod -> SecondaryButtonMenuPlaceholder(settings = settings, modifier = mod) }
-            TweakableButton(id = TouchButtonId.THUMBL, settings = settings, modifier = Modifier) { mod ->
+            TweakableButton(id = TouchButtonId.L, settings = settings) { mod -> SecondaryButtonL(modifier = mod) }
+            TweakableButton(id = TouchButtonId.SELECT, settings = settings) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
+            TweakableButton(id = TouchButtonId.MENU, settings = settings) { mod -> SecondaryButtonMenuPlaceholder(settings = settings, modifier = mod) }
+            TweakableButton(id = TouchButtonId.THUMBL, settings = settings) { mod ->
                 SecondaryAnalogLeft()
             }
         },
@@ -55,7 +55,7 @@ fun PadKitScope.Nintendo3DSRight(
         settings = settings,
         modifier = modifier,
         primaryDial = {
-            TweakableButton(id = TouchButtonId.FACE, settings = settings, modifier = Modifier) { mod ->
+            TweakableButton(id = TouchButtonId.FACE, settings = settings) { mod ->
                 LemuroidControlFaceButtons(
                     modifier = mod,
                     ids =
@@ -76,17 +76,17 @@ fun PadKitScope.Nintendo3DSRight(
             }
         },
         secondaryDials = {
-            TweakableButton(id = TouchButtonId.R, settings = settings, modifier = Modifier) { mod -> SecondaryButtonR(modifier = mod) }
-            TweakableButton(id = TouchButtonId.START, settings = settings, modifier = Modifier) { mod -> SecondaryButtonStart(position = 2, modifier = mod) }
+            TweakableButton(id = TouchButtonId.R, settings = settings) { mod -> SecondaryButtonR(modifier = mod) }
+            TweakableButton(id = TouchButtonId.START, settings = settings) { mod -> SecondaryButtonStart(position = 2, modifier = mod) }
             // THUMBR = 换屏按钮（3DS 专属）
-            TweakableButton(id = TouchButtonId.THUMBR, settings = settings, modifier = Modifier) { mod ->
+            TweakableButton(id = TouchButtonId.THUMBR, settings = settings) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(+80f - 180f).radialScale(2.2f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
                     icon = R.drawable.button_close_screen,
                 )
             }
-            TweakableButton(id = TouchButtonId.L2, settings = settings, modifier = Modifier) { mod ->
+            TweakableButton(id = TouchButtonId.L2, settings = settings) { mod ->
                 SecondaryButtonMenu(settings = settings, modifier = mod)
             }
         },
