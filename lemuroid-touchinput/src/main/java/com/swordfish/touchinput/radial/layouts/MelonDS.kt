@@ -34,6 +34,7 @@ val LocalButtonEdit = compositionLocalOf<((TouchButtonId) -> Unit)?>(defaultFact
 /** Wrapper that applies per-button offset & scale, and intercepts clicks in edit mode */
 @Composable
 fun PadKitScope.TweakableButton(
+    modifier: Modifier = Modifier,
     id: TouchButtonId,
     settings: TouchControllerSettingsManager.Settings,
     content: @Composable (Modifier) -> Unit,
@@ -45,8 +46,8 @@ fun PadKitScope.TweakableButton(
     // Skip rendering if hidden (but still show in edit mode)
     if (settings.isButtonHidden(id) && !isEditing) return
 
-    // Build modifier: graphicsLayer for customization + pointerInput for edit mode
-    val mod = if (bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f) {
+    // Build modifier: base + graphicsLayer for customization + pointerInput for edit mode
+    val baseMod = if (bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f) {
         val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX
         val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY
         Modifier.graphicsLayer(
@@ -58,6 +59,7 @@ fun PadKitScope.TweakableButton(
     } else {
         Modifier
     }
+    val mod = modifier.then(baseMod)
 
     val finalMod = if (isEditing) {
         mod.pointerInput(Unit) {
