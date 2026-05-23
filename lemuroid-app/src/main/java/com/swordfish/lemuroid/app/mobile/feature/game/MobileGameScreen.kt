@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.swordfish.lemuroid.app.mobile.feature.game
 
 import android.graphics.RectF
@@ -281,6 +283,7 @@ private fun GameScreenRunningCentralMenu(
     }
 }
 
+@androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
 private fun MenuEditTouchControls(
     viewModel: BaseGameScreenViewModel,
@@ -293,7 +296,9 @@ private fun MenuEditTouchControls(
 
     val allButtons = TouchButtonId.values().toList()
 
-    // === TOP TOOLBAR (doesn't block buttons) ===
+    // Dropdown state
+    var expanded = remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -305,25 +310,44 @@ private fun MenuEditTouchControls(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // Button selector row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            // Button selector — Exposed Dropdown Menu
+            androidx.compose.material3.ExposedDropdownMenuBox(
+                expanded = expanded.value,
+                onExpandedChange = { expanded.value = !expanded.value },
             ) {
-                TextButton(onClick = { viewModel.cycleEditTarget(-1) }) {
-                    Text("◀")
-                }
-                val btnLabel = selectedButton.value?.label ?: "点击按键选择"
-                Text(text = btnLabel, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                TextButton(onClick = { viewModel.cycleEditTarget(1) }) {
-                    Text("▶")
+                androidx.compose.material3.TextField(
+                    value = selectedButton.value?.label ?: "选择要调节的按键",
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { androidx.compose.material3.ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded.value) },
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth(),
+                    textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    ),
+                )
+                androidx.compose.material3.ExposedDropdownMenu(
+                    expanded = expanded.value,
+                    onDismissRequest = { expanded.value = false },
+                ) {
+                    allButtons.forEach { btn ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(btn.label) },
+                            onClick = {
+                                viewModel.selectEditTarget(btn)
+                                expanded.value = false
+                            },
+                        )
+                    }
                 }
             }
 
             if (selectedButton.value != null) {
                 val id = selectedButton.value!!
                 val bs = touchControllerSettings.getButtonSettings(id)
+                val isHidden = touchControllerSettings.isButtonHidden(id)
 
                 // Size slider
                 MenuEditTouchControlRow(Icons.Default.OpenInFull, "大小", 0f) {
@@ -353,9 +377,22 @@ private fun MenuEditTouchControls(
                         valueRange = -3f..3f,
                     )
                 }
-                // Reset & Done
+                // Visibility toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("显示此按键", modifier = Modifier.padding(start = 4.dp))
+                    androidx.compose.material3.Switch(
+                        checked = !isHidden,
+                        onCheckedChange = { viewModel.toggleButtonVisibility(id, !it) },
+                    )
+                }
+                // Reset & Done — ALWAYS show "全部复位"
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(onClick = { viewModel.resetButtonSettings(id) }) { Text("复位此按键") }
+                    TextButton(onClick = { viewModel.resetTouchControls() }) { Text("全部复位") }
                     TextButton(onClick = { viewModel.toggleEditControls(false) }) { Text("完成") }
                 }
             } else {

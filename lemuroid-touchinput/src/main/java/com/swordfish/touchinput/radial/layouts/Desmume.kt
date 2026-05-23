@@ -1,9 +1,13 @@
 package com.swordfish.touchinput.radial.layouts
 
 import android.view.KeyEvent
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import com.swordfish.touchinput.controller.R
 import com.swordfish.touchinput.radial.controls.LemuroidControlButton
 import com.swordfish.touchinput.radial.controls.LemuroidControlCross
@@ -18,12 +22,48 @@ import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonStart
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
 import com.swordfish.touchinput.radial.layouts.LocalButtonEdit
-import com.swordfish.touchinput.radial.layouts.TweakableButton
 import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
 import gg.padkit.PadKitScope
 import gg.padkit.ids.Id
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
+
+/** Wrapper that applies per-button offset & scale, and intercepts clicks in edit mode */
+@Composable
+fun PadKitScope.TweakableButtonDesmume(
+    id: TouchButtonId,
+    settings: TouchControllerSettingsManager.Settings,
+    content: @Composable (Modifier) -> Unit,
+) {
+    val bs = settings.getButtonSettings(id)
+    val onEditSelect = LocalButtonEdit.current
+    val isEditing = onEditSelect != null
+
+    if (settings.isButtonHidden(id) && !isEditing) return
+
+    val mod = if (bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f) {
+        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX
+        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY
+        Modifier.graphicsLayer(
+            translationX = ox,
+            translationY = oy,
+            scaleX = bs.scale,
+            scaleY = bs.scale,
+        )
+    } else {
+        Modifier
+    }
+
+    val finalMod = if (isEditing) {
+        mod.pointerInput(Unit) {
+            detectTapGestures(onTap = { onEditSelect(id) })
+        }
+    } else {
+        mod
+    }
+
+    content(finalMod)
+}
 
 @Composable
 fun PadKitScope.DesmumeLeft(
@@ -34,24 +74,24 @@ fun PadKitScope.DesmumeLeft(
         settings = settings,
         modifier = modifier,
         primaryDial = {
-            TweakableButton(TouchButtonId.DPAD, settings) {
-                LemuroidControlCross(id = Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD))
+            TweakableButtonDesmume(TouchButtonId.DPAD, settings) { mod ->
+                LemuroidControlCross(modifier = mod, id = Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD))
             }
         },
         secondaryDials = {
-            TweakableButton(TouchButtonId.L, settings) { SecondaryButtonL() }
-            TweakableButton(TouchButtonId.SELECT, settings) { SecondaryButtonSelect(position = 2) }
-            TweakableButton(TouchButtonId.MENU, settings) { SecondaryButtonMenuPlaceholder(settings) }
-            TweakableButton(TouchButtonId.THUMBL, settings) {
+            TweakableButtonDesmume(TouchButtonId.L, settings) { mod -> SecondaryButtonL(modifier = mod) }
+            TweakableButtonDesmume(TouchButtonId.SELECT, settings) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
+            TweakableButtonDesmume(TouchButtonId.MENU, settings) { mod -> SecondaryButtonMenuPlaceholder(settings, modifier = mod) }
+            TweakableButtonDesmume(TouchButtonId.THUMBL, settings) { mod ->
                 LemuroidControlButton(
-                    modifier = Modifier.radialPosition(-120f),
+                    modifier = mod.then(Modifier.radialPosition(-120f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBL),
                     icon = R.drawable.button_mic,
                 )
             }
-            TweakableButton(TouchButtonId.L2, settings) {
+            TweakableButtonDesmume(TouchButtonId.L2, settings) { mod ->
                 LemuroidControlButton(
-                    modifier = Modifier.radialPosition(-60f),
+                    modifier = mod.then(Modifier.radialPosition(-60f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_L2),
                     icon = R.drawable.button_close_screen,
                 )
@@ -69,8 +109,9 @@ fun PadKitScope.DesmumeRight(
         settings = settings,
         modifier = modifier,
         primaryDial = {
-            TweakableButton(TouchButtonId.FACE, settings) {
+            TweakableButtonDesmume(TouchButtonId.FACE, settings) { mod ->
                 LemuroidControlFaceButtons(
+                    modifier = mod,
                     ids =
                         persistentListOf(
                             Id.Key(KeyEvent.KEYCODE_BUTTON_A),
@@ -89,12 +130,12 @@ fun PadKitScope.DesmumeRight(
             }
         },
         secondaryDials = {
-            TweakableButton(TouchButtonId.R, settings) { SecondaryButtonR() }
-            TweakableButton(TouchButtonId.START, settings) { SecondaryButtonStart(position = 2) }
-            TweakableButton(TouchButtonId.MENU, settings) { SecondaryButtonMenu(settings) }
-            TweakableButton(TouchButtonId.THUMBR, settings) {
+            TweakableButtonDesmume(TouchButtonId.R, settings) { mod -> SecondaryButtonR(modifier = mod) }
+            TweakableButtonDesmume(TouchButtonId.START, settings) { mod -> SecondaryButtonStart(position = 2, modifier = mod) }
+            TweakableButtonDesmume(TouchButtonId.MENU, settings) { mod -> SecondaryButtonMenu(settings, modifier = mod) }
+            TweakableButtonDesmume(TouchButtonId.THUMBR, settings) { mod ->
                 LemuroidControlButton(
-                    modifier = Modifier.radialPosition(-120f),
+                    modifier = mod.then(Modifier.radialPosition(-120f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
                     icon = R.drawable.button_swap_screens,
                 )

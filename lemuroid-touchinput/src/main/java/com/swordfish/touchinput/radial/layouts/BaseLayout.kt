@@ -21,14 +21,16 @@ fun BaseLayoutLeft(
     primaryDial: @Composable () -> Unit,
     secondaryDials: @Composable LayoutRadialSecondaryDialsScope.() -> Unit,
 ) {
-    val dpadScale = settings.dpadSettings.scale
+    // FIX: Don't use per-button scale for layout sizing — only use global settings.scale.
+    // Per-button scale is applied via graphicsLayer (visual only, no layout impact).
+    // Using dpadSettings.scale here caused L/Mic/Select/CloseScreen to scale together with DPAD.
     val interpolatedDialSize =
-        remember(settings.scale, dpadScale) {
+        remember(settings.scale) {
             lerp(
                 TouchControllerSettingsManager.MIN_SCALE,
                 TouchControllerSettingsManager.MAX_SCALE,
                 settings.scale,
-            ) * dpadScale
+            )
         }
 
     val leftPadding = maxOf(0f, settings.marginX)
@@ -57,7 +59,16 @@ fun BaseLayoutRight(
     primaryDial: @Composable () -> Unit,
     secondaryDials: @Composable LayoutRadialSecondaryDialsScope.() -> Unit,
 ) {
-    val faceScale = settings.faceButtonsSettings.scale
+    // FIX: Same as left — don't use faceButtonsSettings.scale for layout sizing.
+    val interpolatedDialSize =
+        remember(settings.scale) {
+            lerp(
+                TouchControllerSettingsManager.MIN_SCALE,
+                TouchControllerSettingsManager.MAX_SCALE,
+                settings.scale,
+            )
+        }
+
     val rightPadding = maxOf(0f, settings.marginX)
     val bottomPadding = maxOf(0f, settings.marginY)
 
@@ -71,13 +82,7 @@ fun BaseLayoutRight(
                 .padding(LocalLemuroidPadTheme.current.padding),
         primaryDial = primaryDial,
         secondaryDials = secondaryDials,
-        primaryDialMaxSize =
-            160.dp *
-                lerp(
-                    TouchControllerSettingsManager.MIN_SCALE,
-                    TouchControllerSettingsManager.MAX_SCALE,
-                    settings.scale,
-                ) * faceScale,
+        primaryDialMaxSize = 160.dp * interpolatedDialSize,
         secondaryDialsBaseRotationInDegrees = -settings.rotation * TouchControllerSettingsManager.MAX_ROTATION,
     )
 }

@@ -48,9 +48,15 @@ class TouchControllerSettingsManager(private val sharedPreferences: SharedPrefer
         val marginY: Float = DEFAULT_MARGIN_Y,
         // Per-button independent settings
         val buttonSettings: Map<String, ButtonGroupSettings> = emptyMap(),
+        // Hidden buttons (by name)
+        val hiddenButtons: Set<String> = emptySet(),
     ) {
         fun getButtonSettings(id: TouchButtonId) = buttonSettings[id.name] ?: ButtonGroupSettings()
         fun setButtonSettings(id: TouchButtonId, s: ButtonGroupSettings) = copy(buttonSettings = buttonSettings + (id.name to s))
+        fun isButtonHidden(id: TouchButtonId) = id.name in hiddenButtons
+        fun setButtonHidden(id: TouchButtonId, hidden: Boolean) =
+            if (hidden) copy(hiddenButtons = hiddenButtons + id.name)
+            else copy(hiddenButtons = hiddenButtons - id.name)
         // Legacy fields kept for backward compat
         val dpadSettings: ButtonGroupSettings get() = getButtonSettings(TouchButtonId.DPAD)
         val faceButtonsSettings: ButtonGroupSettings get() = getButtonSettings(TouchButtonId.FACE)

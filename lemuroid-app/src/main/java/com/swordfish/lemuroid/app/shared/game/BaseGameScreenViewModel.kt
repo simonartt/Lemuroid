@@ -229,6 +229,7 @@ class BaseGameScreenViewModel(
     fun updateButtonOffset(id: TouchButtonId, dx: Float, dy: Float) { touchControls.updateButtonOffset(id, dx, dy) }
     fun updateButtonScale(id: TouchButtonId, newScale: Float) { touchControls.updateButtonScale(id, newScale) }
     fun resetButtonSettings(id: TouchButtonId) { touchControls.resetButtonSettings(id) }
+    fun toggleButtonVisibility(id: TouchButtonId, hidden: Boolean) { touchControls.toggleButtonVisibility(id, hidden) }
 
     fun onScreenOrientationChanged(orientation: TouchControllerSettingsManager.Orientation) {
         touchControls.updateScreenOrientation(orientation)

@@ -270,6 +270,20 @@ class GameViewModelTouchControls(
         }
     }
 
+    fun toggleButtonVisibility(id: TouchButtonId, hidden: Boolean) {
+        scope.launch {
+            val s = touchControllerSettingsManager.observeSettings(
+                touchControlId.value, screenOrientation.value,
+                androidx.compose.ui.unit.Density(1f, 1f),
+                androidx.compose.foundation.layout.WindowInsets(0),
+            ).first()
+            touchControllerSettingsManager.storeSettings(
+                touchControlId.value, screenOrientation.value,
+                s.setButtonHidden(id, hidden),
+            )
+        }
+    }
+
     private fun handleVirtualInputButton(event: InputEvent.Button) {
         val action = if (event.pressed) KeyEvent.ACTION_DOWN else KeyEvent.ACTION_UP
         retroGameView.retroGameView?.sendKeyEvent(action, event.id)
