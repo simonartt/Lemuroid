@@ -1,6 +1,6 @@
 <resources>
-    <color name="main_color">#00c64e</color>
-    <color name="main_color_light">#9de3aa</color>
+    <color name="main_color">#FF0000</color>
+    <color name="main_color_light">#FF9999</color>
 
     <!-- Generated using material color builder -->
     <color name="md_theme_light_primary">#006E24</color>
