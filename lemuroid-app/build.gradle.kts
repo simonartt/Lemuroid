@@ -98,6 +98,8 @@ android {
             signingConfig = signingConfigs["release"]
             proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
             resValue("string", "lemuroid_name", "Lemuroid V8A")
+            manifestPlaceholders["appIcon"] = "@mipmap/lemuroid_v8a_launcher"
+            manifestPlaceholders["appIconRound"] = "@mipmap/lemuroid_v8a_launcher_round"
         }
         getByName("debug") {
             applicationIdSuffix = ".debug"
