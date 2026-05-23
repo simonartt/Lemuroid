@@ -297,7 +297,9 @@ private fun MenuEditTouchControls(
                         .padding(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                MenuEditTouchControlRow(Icons.Default.OpenInFull, "Scale", 0f) {
+                // Global settings
+                Text(text = "全局设置", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                MenuEditTouchControlRow(Icons.Default.OpenInFull, "整体大小", 0f) {
                     Slider(
                         value = touchControllerSettings.scale,
                         onValueChange = {
@@ -307,7 +309,7 @@ private fun MenuEditTouchControls(
                         },
                     )
                 }
-                MenuEditTouchControlRow(Icons.Default.Height, "Horizontal Margin", 90f) {
+                MenuEditTouchControlRow(Icons.Default.Height, "水平间距", 90f) {
                     Slider(
                         value = touchControllerSettings.marginX,
                         onValueChange = {
@@ -317,7 +319,7 @@ private fun MenuEditTouchControls(
                         },
                     )
                 }
-                MenuEditTouchControlRow(Icons.Default.Height, "Vertical Margin", 0f) {
+                MenuEditTouchControlRow(Icons.Default.Height, "垂直间距", 0f) {
                     Slider(
                         value = touchControllerSettings.marginY,
                         onValueChange = {
@@ -328,7 +330,7 @@ private fun MenuEditTouchControls(
                     )
                 }
                 if (controllerConfig.allowTouchRotation) {
-                    MenuEditTouchControlRow(Icons.Default.RotateLeft, "Rotate", 0f) {
+                    MenuEditTouchControlRow(Icons.Default.RotateLeft, "旋转", 0f) {
                         Slider(
                             value = touchControllerSettings.rotation,
                             onValueChange = {
@@ -339,6 +341,86 @@ private fun MenuEditTouchControls(
                         )
                     }
                 }
+
+                // D-pad group settings
+                Text(text = "方向键 (D-Pad)", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                MenuEditTouchControlRow(Icons.Default.OpenInFull, "大小", 0f) {
+                    Slider(
+                        value = touchControllerSettings.dpadSettings.scale,
+                        onValueChange = {
+                            viewModel.updateTouchControllerSettings(
+                                touchControllerSettings.copy(dpadSettings = touchControllerSettings.dpadSettings.copy(scale = it)),
+                            )
+                        },
+                        valueRange = 0.5f..2f,
+                    )
+                }
+                MenuEditTouchControlRow(Icons.Default.Height, "水平偏移", 0f) {
+                    Slider(
+                        value = touchControllerSettings.dpadSettings.offsetX,
+                        onValueChange = {
+                            viewModel.updateTouchControllerSettings(
+                                touchControllerSettings.copy(dpadSettings = touchControllerSettings.dpadSettings.copy(offsetX = it)),
+                            )
+                        },
+                        valueRange = -1f..1f,
+                    )
+                }
+                MenuEditTouchControlRow(Icons.Default.Height, "垂直偏移", 0f) {
+                    Slider(
+                        value = touchControllerSettings.dpadSettings.offsetY,
+                        onValueChange = {
+                            viewModel.updateTouchControllerSettings(
+                                touchControllerSettings.copy(dpadSettings = touchControllerSettings.dpadSettings.copy(offsetY = it)),
+                            )
+                        },
+                        valueRange = -1f..1f,
+                    )
+                }
+                TextButton(onClick = { viewModel.resetDpadSettings() }) {
+                    Text(text = "复位方向键")
+                }
+
+                // Face buttons group settings
+                Text(text = "功能键 (Y/X/A/B)", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                MenuEditTouchControlRow(Icons.Default.OpenInFull, "大小", 0f) {
+                    Slider(
+                        value = touchControllerSettings.faceButtonsSettings.scale,
+                        onValueChange = {
+                            viewModel.updateTouchControllerSettings(
+                                touchControllerSettings.copy(faceButtonsSettings = touchControllerSettings.faceButtonsSettings.copy(scale = it)),
+                            )
+                        },
+                        valueRange = 0.5f..2f,
+                    )
+                }
+                MenuEditTouchControlRow(Icons.Default.Height, "水平偏移", 0f) {
+                    Slider(
+                        value = touchControllerSettings.faceButtonsSettings.offsetX,
+                        onValueChange = {
+                            viewModel.updateTouchControllerSettings(
+                                touchControllerSettings.copy(faceButtonsSettings = touchControllerSettings.faceButtonsSettings.copy(offsetX = it)),
+                            )
+                        },
+                        valueRange = -1f..1f,
+                    )
+                }
+                MenuEditTouchControlRow(Icons.Default.Height, "垂直偏移", 0f) {
+                    Slider(
+                        value = touchControllerSettings.faceButtonsSettings.offsetY,
+                        onValueChange = {
+                            viewModel.updateTouchControllerSettings(
+                                touchControllerSettings.copy(faceButtonsSettings = touchControllerSettings.faceButtonsSettings.copy(offsetY = it)),
+                            )
+                        },
+                        valueRange = -1f..1f,
+                    )
+                }
+                TextButton(onClick = { viewModel.resetFaceButtonsSettings() }) {
+                    Text(text = "复位功能键")
+                }
+
+                // Bottom buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,

@@ -29,6 +29,7 @@ fun PadKitScope.MelonDSLeft(
 ) {
     BaseLayoutLeft(
         settings = settings,
+        groupSettings = settings.dpadSettings,
         modifier = modifier,
         primaryDial = { LemuroidControlCross(id = Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD)) },
         secondaryDials = {
@@ -56,6 +57,7 @@ fun PadKitScope.MelonDSRight(
 ) {
     BaseLayoutRight(
         settings = settings,
+        groupSettings = settings.faceButtonsSettings,
         modifier = modifier,
         primaryDial = {
             LemuroidControlFaceButtons(

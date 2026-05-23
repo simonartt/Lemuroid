@@ -24,12 +24,32 @@ class TouchControllerSettingsManager(private val sharedPreferences: SharedPrefer
     }
 
     @Serializable
+    data class ButtonGroupSettings(
+        val scale: Float = 1.0f,
+        val offsetX: Float = 0f,
+        val offsetY: Float = 0f,
+    ) {
+        companion object {
+            val DEFAULT = ButtonGroupSettings()
+            fun reset() = DEFAULT
+        }
+    }
+
+    @Serializable
     data class Settings(
         val scale: Float = DEFAULT_SCALE,
         val rotation: Float = DEFAULT_ROTATION,
         val marginX: Float = DEFAULT_MARGIN_X,
         val marginY: Float = DEFAULT_MARGIN_Y,
-    )
+        // Per-group button customization
+        val dpadSettings: ButtonGroupSettings = ButtonGroupSettings(),
+        val faceButtonsSettings: ButtonGroupSettings = ButtonGroupSettings(),
+    ) {
+        fun withDpadSettings(s: ButtonGroupSettings) = copy(dpadSettings = s)
+        fun withFaceButtonsSettings(s: ButtonGroupSettings) = copy(faceButtonsSettings = s)
+        fun resetDpad() = copy(dpadSettings = ButtonGroupSettings())
+        fun resetFaceButtons() = copy(faceButtonsSettings = ButtonGroupSettings())
+    }
 
     private fun computeInsetsPaddings(
         density: Density,

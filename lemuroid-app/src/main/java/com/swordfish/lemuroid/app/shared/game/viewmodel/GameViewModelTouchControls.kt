@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -91,6 +92,38 @@ class GameViewModelTouchControls(
                 touchControlId.value,
                 screenOrientation.value,
                 touchControllerSettings,
+            )
+        }
+    }
+
+    fun resetDpadSettings() {
+        scope.launch {
+            val currentSettings = touchControllerSettingsManager.observeSettings(
+                touchControlId.value,
+                screenOrientation.value,
+                androidx.compose.ui.unit.Density(1f, 1f),
+                androidx.compose.foundation.layout.WindowInsets(0),
+            ).first()
+            touchControllerSettingsManager.storeSettings(
+                touchControlId.value,
+                screenOrientation.value,
+                currentSettings.copy(dpadSettings = TouchControllerSettingsManager.ButtonGroupSettings()),
+            )
+        }
+    }
+
+    fun resetFaceButtonsSettings() {
+        scope.launch {
+            val currentSettings = touchControllerSettingsManager.observeSettings(
+                touchControlId.value,
+                screenOrientation.value,
+                androidx.compose.ui.unit.Density(1f, 1f),
+                androidx.compose.foundation.layout.WindowInsets(0),
+            ).first()
+            touchControllerSettingsManager.storeSettings(
+                touchControlId.value,
+                screenOrientation.value,
+                currentSettings.copy(faceButtonsSettings = TouchControllerSettingsManager.ButtonGroupSettings()),
             )
         }
     }

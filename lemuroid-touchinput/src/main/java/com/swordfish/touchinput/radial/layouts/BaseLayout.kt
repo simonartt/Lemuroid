@@ -18,24 +18,26 @@ context(PadKitScope)
 fun BaseLayoutLeft(
     modifier: Modifier = Modifier,
     settings: TouchControllerSettingsManager.Settings,
+    groupSettings: TouchControllerSettingsManager.ButtonGroupSettings? = null,
     primaryDial: @Composable () -> Unit,
     secondaryDials: @Composable LayoutRadialSecondaryDialsScope.() -> Unit,
 ) {
+    val g = groupSettings ?: TouchControllerSettingsManager.ButtonGroupSettings()
     val interpolatedDialSize =
-        remember(settings.scale) {
+        remember(settings.scale, g.scale) {
             lerp(
                 TouchControllerSettingsManager.MIN_SCALE,
                 TouchControllerSettingsManager.MAX_SCALE,
                 settings.scale,
-            )
+            ) * g.scale
         }
 
     LayoutRadial(
         modifier =
             modifier
                 .absolutePadding(
-                    left = TouchControllerSettingsManager.MAX_MARGINS.dp * settings.marginX,
-                    bottom = TouchControllerSettingsManager.MAX_MARGINS.dp * settings.marginY,
+                    left = TouchControllerSettingsManager.MAX_MARGINS.dp * (settings.marginX + g.offsetX),
+                    bottom = TouchControllerSettingsManager.MAX_MARGINS.dp * (settings.marginY + g.offsetY),
                 )
                 .padding(LocalLemuroidPadTheme.current.padding),
         primaryDial = primaryDial,
@@ -50,15 +52,17 @@ context(PadKitScope)
 fun BaseLayoutRight(
     modifier: Modifier = Modifier,
     settings: TouchControllerSettingsManager.Settings,
+    groupSettings: TouchControllerSettingsManager.ButtonGroupSettings? = null,
     primaryDial: @Composable () -> Unit,
     secondaryDials: @Composable LayoutRadialSecondaryDialsScope.() -> Unit,
 ) {
+    val g = groupSettings ?: TouchControllerSettingsManager.ButtonGroupSettings()
     LayoutRadial(
         modifier =
             modifier
                 .absolutePadding(
-                    right = TouchControllerSettingsManager.MAX_MARGINS.dp * settings.marginX,
-                    bottom = TouchControllerSettingsManager.MAX_MARGINS.dp * settings.marginY,
+                    right = TouchControllerSettingsManager.MAX_MARGINS.dp * (settings.marginX + g.offsetX),
+                    bottom = TouchControllerSettingsManager.MAX_MARGINS.dp * (settings.marginY + g.offsetY),
                 )
                 .padding(LocalLemuroidPadTheme.current.padding),
         primaryDial = primaryDial,
@@ -69,7 +73,7 @@ fun BaseLayoutRight(
                     TouchControllerSettingsManager.MIN_SCALE,
                     TouchControllerSettingsManager.MAX_SCALE,
                     settings.scale,
-                ),
+                ) * g.scale,
         secondaryDialsBaseRotationInDegrees = -settings.rotation * TouchControllerSettingsManager.MAX_ROTATION,
     )
 }

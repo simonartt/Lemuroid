@@ -217,6 +217,14 @@ class BaseGameScreenViewModel(
         touchControls.updateTouchControllerSettings(touchControllerSettings)
     }
 
+    fun resetDpadSettings() {
+        touchControls.resetDpadSettings()
+    }
+
+    fun resetFaceButtonsSettings() {
+        touchControls.resetFaceButtonsSettings()
+    }
+
     fun resetTouchControls() {
         touchControls.resetTouchControls()
     }
