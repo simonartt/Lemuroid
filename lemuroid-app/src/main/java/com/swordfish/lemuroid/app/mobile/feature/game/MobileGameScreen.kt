@@ -40,6 +40,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -48,6 +49,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -61,6 +63,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.constraintlayout.compose.ConstraintLayout
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.swordfish.lemuroid.app.shared.game.BaseGameScreenViewModel
+import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls.Companion.MENU_LOADING_ANIMATION_MILLIS
 import com.swordfish.lemuroid.app.shared.settings.HapticFeedbackMode
 import com.swordfish.lemuroid.lib.controller.ControllerConfig
@@ -280,162 +283,132 @@ private fun MenuEditTouchControls(
     touchControllerSettings: TouchControllerSettingsManager.Settings,
 ) {
     val showEditControls = viewModel.isEditControlShown().collectAsState(false)
+    val editingTarget = viewModel.getEditingSelection().collectAsState(GameViewModelTouchControls.EditTarget.NONE)
     if (!showEditControls.value) return
 
-    Dialog(onDismissRequest = { viewModel.showEditControls(false) }) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val displayWidth = with(density) { LocalContext.current.resources.displayMetrics.widthPixels / density.density }
+
+    // Full-screen drag overlay for selecting & dragging buttons
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        // Tap to select: left half = dpad, right half = face
+                        val target = if (offset.x < displayWidth / 2f)
+                            GameViewModelTouchControls.EditTarget.DPAD
+                        else
+                            GameViewModelTouchControls.EditTarget.FACE
+                        viewModel.selectEditTarget(target)
+                    },
+                    onDragEnd = { },
+                    onDragCancel = { },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        // Drag moves the selected button
+                        val dx = with(density) { (dragAmount.x / TouchControllerSettingsManager.MAX_MARGINS.dp.toPx()) }
+                        val dy = with(density) { (dragAmount.y / TouchControllerSettingsManager.MAX_MARGINS.dp.toPx()) }
+                        when (editingTarget.value) {
+                            GameViewModelTouchControls.EditTarget.DPAD -> viewModel.updateDpadOffset(dx, dy)
+                            GameViewModelTouchControls.EditTarget.FACE -> viewModel.updateFaceOffset(dx, dy)
+                            else -> {}
+                        }
+                    },
+                )
+            },
+    ) {
+        // Highlight the selected button area
+        when (editingTarget.value) {
+            GameViewModelTouchControls.EditTarget.DPAD -> {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxSize(0.5f)
+                        .background(Color(0x2000D4AA)),
+                )
+            }
+            GameViewModelTouchControls.EditTarget.FACE -> {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .fillMaxSize(0.5f)
+                        .background(Color(0x2000D4AA)),
+                )
+            }
+            else -> {}
+        }
+
+        // Floating edit panel at bottom center
         Card(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .wrapContentHeight(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(16.dp),
         ) {
             Column(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .wrapContentHeight()
-                        .padding(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Global settings
-                Text(text = "全局设置", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                MenuEditTouchControlRow(Icons.Default.OpenInFull, "整体大小", 0f) {
-                    Slider(
-                        value = touchControllerSettings.scale,
-                        onValueChange = {
-                            viewModel.updateTouchControllerSettings(
-                                touchControllerSettings.copy(scale = it),
-                            )
-                        },
-                    )
+                // Selected target label
+                val label = when (editingTarget.value) {
+                    GameViewModelTouchControls.EditTarget.DPAD -> "方向键 (D-Pad)"
+                    GameViewModelTouchControls.EditTarget.FACE -> "功能键 (Y/X/A/B)"
+                    else -> "点击屏幕选择要调整的按键"
                 }
-                MenuEditTouchControlRow(Icons.Default.Height, "水平间距", 90f) {
-                    Slider(
-                        value = touchControllerSettings.marginX,
-                        onValueChange = {
-                            viewModel.updateTouchControllerSettings(
-                                touchControllerSettings.copy(marginX = it),
-                            )
-                        },
-                    )
-                }
-                MenuEditTouchControlRow(Icons.Default.Height, "垂直间距", 0f) {
-                    Slider(
-                        value = touchControllerSettings.marginY,
-                        onValueChange = {
-                            viewModel.updateTouchControllerSettings(
-                                touchControllerSettings.copy(marginY = it),
-                            )
-                        },
-                    )
-                }
-                if (controllerConfig.allowTouchRotation) {
-                    MenuEditTouchControlRow(Icons.Default.RotateLeft, "旋转", 0f) {
+                Text(text = label, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+
+                if (editingTarget.value != GameViewModelTouchControls.EditTarget.NONE) {
+                    // Size slider
+                    MenuEditTouchControlRow(Icons.Default.OpenInFull, "大小", 0f) {
                         Slider(
-                            value = touchControllerSettings.rotation,
-                            onValueChange = {
-                                viewModel.updateTouchControllerSettings(
-                                    touchControllerSettings.copy(rotation = it),
-                                )
+                            value = when (editingTarget.value) {
+                                GameViewModelTouchControls.EditTarget.DPAD -> touchControllerSettings.dpadSettings.scale
+                                GameViewModelTouchControls.EditTarget.FACE -> touchControllerSettings.faceButtonsSettings.scale
+                                else -> 1f
                             },
+                            onValueChange = { newScale ->
+                                val newSettings = when (editingTarget.value) {
+                                    GameViewModelTouchControls.EditTarget.DPAD ->
+                                        touchControllerSettings.copy(dpadSettings = touchControllerSettings.dpadSettings.copy(scale = newScale))
+                                    GameViewModelTouchControls.EditTarget.FACE ->
+                                        touchControllerSettings.copy(faceButtonsSettings = touchControllerSettings.faceButtonsSettings.copy(scale = newScale))
+                                    else -> touchControllerSettings
+                                }
+                                viewModel.updateTouchControllerSettings(newSettings)
+                            },
+                            valueRange = 0.5f..2f,
                         )
                     }
+
+                    // Reset button for selected target
+                    TextButton(
+                        onClick = {
+                            when (editingTarget.value) {
+                                GameViewModelTouchControls.EditTarget.DPAD -> viewModel.resetDpadSettings()
+                                GameViewModelTouchControls.EditTarget.FACE -> viewModel.resetFaceButtonsSettings()
+                                else -> {}
+                            }
+                        },
+                    ) {
+                        Text(text = "复位")
+                    }
                 }
 
-                // D-pad group settings
-                Text(text = "方向键 (D-Pad)", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                MenuEditTouchControlRow(Icons.Default.OpenInFull, "大小", 0f) {
-                    Slider(
-                        value = touchControllerSettings.dpadSettings.scale,
-                        onValueChange = {
-                            viewModel.updateTouchControllerSettings(
-                                touchControllerSettings.copy(dpadSettings = touchControllerSettings.dpadSettings.copy(scale = it)),
-                            )
-                        },
-                        valueRange = 0.5f..2f,
-                    )
-                }
-                MenuEditTouchControlRow(Icons.Default.Height, "水平偏移", 0f) {
-                    Slider(
-                        value = touchControllerSettings.dpadSettings.offsetX,
-                        onValueChange = {
-                            viewModel.updateTouchControllerSettings(
-                                touchControllerSettings.copy(dpadSettings = touchControllerSettings.dpadSettings.copy(offsetX = it)),
-                            )
-                        },
-                        valueRange = -1f..1f,
-                    )
-                }
-                MenuEditTouchControlRow(Icons.Default.Height, "垂直偏移", 0f) {
-                    Slider(
-                        value = touchControllerSettings.dpadSettings.offsetY,
-                        onValueChange = {
-                            viewModel.updateTouchControllerSettings(
-                                touchControllerSettings.copy(dpadSettings = touchControllerSettings.dpadSettings.copy(offsetY = it)),
-                            )
-                        },
-                        valueRange = -1f..1f,
-                    )
-                }
-                TextButton(onClick = { viewModel.resetDpadSettings() }) {
-                    Text(text = "复位方向键")
-                }
-
-                // Face buttons group settings
-                Text(text = "功能键 (Y/X/A/B)", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                MenuEditTouchControlRow(Icons.Default.OpenInFull, "大小", 0f) {
-                    Slider(
-                        value = touchControllerSettings.faceButtonsSettings.scale,
-                        onValueChange = {
-                            viewModel.updateTouchControllerSettings(
-                                touchControllerSettings.copy(faceButtonsSettings = touchControllerSettings.faceButtonsSettings.copy(scale = it)),
-                            )
-                        },
-                        valueRange = 0.5f..2f,
-                    )
-                }
-                MenuEditTouchControlRow(Icons.Default.Height, "水平偏移", 0f) {
-                    Slider(
-                        value = touchControllerSettings.faceButtonsSettings.offsetX,
-                        onValueChange = {
-                            viewModel.updateTouchControllerSettings(
-                                touchControllerSettings.copy(faceButtonsSettings = touchControllerSettings.faceButtonsSettings.copy(offsetX = it)),
-                            )
-                        },
-                        valueRange = -1f..1f,
-                    )
-                }
-                MenuEditTouchControlRow(Icons.Default.Height, "垂直偏移", 0f) {
-                    Slider(
-                        value = touchControllerSettings.faceButtonsSettings.offsetY,
-                        onValueChange = {
-                            viewModel.updateTouchControllerSettings(
-                                touchControllerSettings.copy(faceButtonsSettings = touchControllerSettings.faceButtonsSettings.copy(offsetY = it)),
-                            )
-                        },
-                        valueRange = -1f..1f,
-                    )
-                }
-                TextButton(onClick = { viewModel.resetFaceButtonsSettings() }) {
-                    Text(text = "复位功能键")
-                }
-
-                // Bottom buttons
+                // Bottom row: reset all + done
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    TextButton(
-                        onClick = { viewModel.resetTouchControls() },
-                        modifier = Modifier.padding(8.dp),
-                    ) {
-                        Text(text = stringResource(R.string.touch_customize_button_reset))
+                    TextButton(onClick = { viewModel.resetTouchControls() }) {
+                        Text(text = "全部复位")
                     }
-                    TextButton(
-                        onClick = { viewModel.showEditControls(false) },
-                        modifier = Modifier.padding(8.dp),
-                    ) {
-                        Text(text = stringResource(R.string.touch_customize_button_done))
+                    TextButton(onClick = { viewModel.showEditControls(false) }) {
+                        Text(text = "完成")
                     }
                 }
             }

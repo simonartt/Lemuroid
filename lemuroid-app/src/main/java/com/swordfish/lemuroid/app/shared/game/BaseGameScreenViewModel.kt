@@ -225,6 +225,21 @@ class BaseGameScreenViewModel(
         touchControls.resetFaceButtonsSettings()
     }
 
+    fun getEditingSelection(): Flow<GameViewModelTouchControls.EditTarget> =
+        touchControls.getEditingSelection()
+
+    fun selectEditTarget(target: GameViewModelTouchControls.EditTarget) {
+        touchControls.selectEditTarget(target)
+    }
+
+    fun updateDpadOffset(dx: Float, dy: Float) {
+        touchControls.updateDpadOffset(dx, dy)
+    }
+
+    fun updateFaceOffset(dx: Float, dy: Float) {
+        touchControls.updateFaceOffset(dx, dy)
+    }
+
     fun resetTouchControls() {
         touchControls.resetTouchControls()
     }

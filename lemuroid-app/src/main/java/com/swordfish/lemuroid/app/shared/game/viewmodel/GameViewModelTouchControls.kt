@@ -53,6 +53,10 @@ class GameViewModelTouchControls(
     private val hapticFeedbackMode = MutableStateFlow(HapticFeedbackMode.NONE)
     // Manual toggle for virtual controls visibility, decoupled from gamepad connection
     private val virtualControlsEnabled = MutableStateFlow(true)
+    // Editing: which button group is selected for drag/resize
+    private val editingSelection = MutableStateFlow<EditTarget>(EditTarget.NONE)
+
+    enum class EditTarget { NONE, DPAD, FACE }
 
     private var loadingMenuJob: Job? = null
 
@@ -234,6 +238,45 @@ class GameViewModelTouchControls(
 
     fun showEditControls(show: Boolean) {
         showEditControls.value = show
+        if (!show) editingSelection.value = EditTarget.NONE
+    }
+
+    fun getEditingSelection(): Flow<EditTarget> = editingSelection
+
+    fun selectEditTarget(target: EditTarget) {
+        editingSelection.value = target
+    }
+
+    fun updateDpadOffset(dx: Float, dy: Float) {
+        scope.launch {
+            val s = touchControllerSettingsManager.observeSettings(
+                touchControlId.value, screenOrientation.value,
+                androidx.compose.ui.unit.Density(1f, 1f),
+                androidx.compose.foundation.layout.WindowInsets(0),
+            ).first()
+            val newOffsetX = (s.dpadSettings.offsetX + dx).coerceIn(-2f, 2f)
+            val newOffsetY = (s.dpadSettings.offsetY + dy).coerceIn(-2f, 2f)
+            touchControllerSettingsManager.storeSettings(
+                touchControlId.value, screenOrientation.value,
+                s.copy(dpadSettings = s.dpadSettings.copy(offsetX = newOffsetX, offsetY = newOffsetY)),
+            )
+        }
+    }
+
+    fun updateFaceOffset(dx: Float, dy: Float) {
+        scope.launch {
+            val s = touchControllerSettingsManager.observeSettings(
+                touchControlId.value, screenOrientation.value,
+                androidx.compose.ui.unit.Density(1f, 1f),
+                androidx.compose.foundation.layout.WindowInsets(0),
+            ).first()
+            val newOffsetX = (s.faceButtonsSettings.offsetX + dx).coerceIn(-2f, 2f)
+            val newOffsetY = (s.faceButtonsSettings.offsetY + dy).coerceIn(-2f, 2f)
+            touchControllerSettingsManager.storeSettings(
+                touchControlId.value, screenOrientation.value,
+                s.copy(faceButtonsSettings = s.faceButtonsSettings.copy(offsetX = newOffsetX, offsetY = newOffsetY)),
+            )
+        }
     }
 
     private fun handleVirtualInputButton(event: InputEvent.Button) {
