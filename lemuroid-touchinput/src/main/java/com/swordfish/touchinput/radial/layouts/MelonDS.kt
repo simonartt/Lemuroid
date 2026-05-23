@@ -34,10 +34,10 @@ val LocalButtonEdit = compositionLocalOf<((TouchButtonId) -> Unit)?>(defaultFact
 /** Wrapper that applies per-button offset & scale, and intercepts clicks in edit mode */
 @Composable
 fun PadKitScope.TweakableButton(
-    modifier: Modifier = Modifier,
     id: TouchButtonId,
     settings: TouchControllerSettingsManager.Settings,
     content: @Composable (Modifier) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val bs = settings.getButtonSettings(id)
     val onEditSelect = LocalButtonEdit.current
@@ -81,22 +81,22 @@ fun PadKitScope.MelonDSLeft(
         settings = settings,
         modifier = modifier,
         primaryDial = {
-            TweakableButton(TouchButtonId.DPAD, settings) { mod ->
+            TweakableButton(id = TouchButtonId.DPAD, settings = settings, modifier = Modifier) { mod ->
                 LemuroidControlCross(modifier = mod, id = Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD))
             }
         },
         secondaryDials = {
-            TweakableButton(TouchButtonId.L, settings) { mod -> SecondaryButtonL(modifier = mod) }
-            TweakableButton(TouchButtonId.SELECT, settings) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
-            TweakableButton(TouchButtonId.MENU, settings) { mod -> SecondaryButtonMenuPlaceholder(settings, modifier = mod) }
-            TweakableButton(TouchButtonId.L2, settings) { mod ->
+            TweakableButton(id = TouchButtonId.L, settings = settings, modifier = Modifier) { mod -> SecondaryButtonL(modifier = mod) }
+            TweakableButton(id = TouchButtonId.SELECT, settings = settings, modifier = Modifier) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
+            TweakableButton(id = TouchButtonId.MENU, settings = settings, modifier = Modifier) { mod -> SecondaryButtonMenuPlaceholder(settings, modifier = mod) }
+            TweakableButton(id = TouchButtonId.L2, settings = settings, modifier = Modifier) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(-120f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_L2),
                     icon = R.drawable.button_mic,
                 )
             }
-            TweakableButton(TouchButtonId.THUMBL, settings) { mod ->
+            TweakableButton(id = TouchButtonId.THUMBL, settings = settings, modifier = Modifier) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(-60f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBL),
@@ -116,7 +116,7 @@ fun PadKitScope.MelonDSRight(
         settings = settings,
         modifier = modifier,
         primaryDial = {
-            TweakableButton(TouchButtonId.FACE, settings) { mod ->
+            TweakableButton(id = TouchButtonId.FACE, settings = settings, modifier = Modifier) { mod ->
                 LemuroidControlFaceButtons(
                     modifier = mod,
                     ids =
@@ -137,10 +137,10 @@ fun PadKitScope.MelonDSRight(
             }
         },
         secondaryDials = {
-            TweakableButton(TouchButtonId.R, settings) { mod -> SecondaryButtonR(modifier = mod) }
-            TweakableButton(TouchButtonId.START, settings) { mod -> SecondaryButtonStart(position = 2, modifier = mod) }
-            TweakableButton(TouchButtonId.MENU, settings) { mod -> SecondaryButtonMenu(settings, modifier = mod) }
-            TweakableButton(TouchButtonId.THUMBR, settings) { mod ->
+            TweakableButton(id = TouchButtonId.R, settings = settings, modifier = Modifier) { mod -> SecondaryButtonR(modifier = mod) }
+            TweakableButton(id = TouchButtonId.START, settings = settings, modifier = Modifier) { mod -> SecondaryButtonStart(position = 2, modifier = mod) }
+            TweakableButton(id = TouchButtonId.MENU, settings = settings, modifier = Modifier) { mod -> SecondaryButtonMenu(settings, modifier = mod) }
+            TweakableButton(id = TouchButtonId.THUMBR, settings = settings, modifier = Modifier) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(-120f)),
                     id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
