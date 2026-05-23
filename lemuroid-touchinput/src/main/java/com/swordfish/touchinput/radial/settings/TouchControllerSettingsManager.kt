@@ -91,8 +91,15 @@ class TouchControllerSettingsManager(private val sharedPreferences: SharedPrefer
         val cachedStateFlow =
             cachedSettings.getOrPut(settingsKey) {
                 val currentSettings =
-                    sharedPreferences.getString(settingsKey, null)
-                        ?.let { Json.decodeFromString(Settings.serializer(), it) }
+                    try {
+                        sharedPreferences.getString(settingsKey, null)
+                            ?.let { Json.decodeFromString(Settings.serializer(), it) }
+                    } catch (e: Exception) {
+                        // Settings corrupted or contains invalid values — auto-reset to defaults
+                        Timber.w(e, "Touch settings corrupted for key $settingsKey, resetting to defaults")
+                        sharedPreferences.edit { remove(settingsKey) }
+                        null
+                    }
 
                 MutableStateFlow(currentSettings)
             }

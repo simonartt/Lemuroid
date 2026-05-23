@@ -32,15 +32,29 @@ fun BaseLayoutLeft(
             ) * g.scale
         }
 
+    // Clamp padding to prevent negative values from crashing
+    // offsetX/Y applied via Modifier.offset to primaryDial only (secondary dials stay in place)
+    val leftPadding = maxOf(0f, settings.marginX)
+    val bottomPadding = maxOf(0f, settings.marginY)
+    val offsetX = (TouchControllerSettingsManager.MAX_MARGINS * g.offsetX).dp
+    val offsetY = (TouchControllerSettingsManager.MAX_MARGINS * g.offsetY).dp
+
     LayoutRadial(
         modifier =
             modifier
                 .absolutePadding(
-                    left = TouchControllerSettingsManager.MAX_MARGINS.dp * (settings.marginX + g.offsetX),
-                    bottom = TouchControllerSettingsManager.MAX_MARGINS.dp * (settings.marginY + g.offsetY),
+                    left = TouchControllerSettingsManager.MAX_MARGINS.dp * leftPadding,
+                    bottom = TouchControllerSettingsManager.MAX_MARGINS.dp * bottomPadding,
                 )
                 .padding(LocalLemuroidPadTheme.current.padding),
-        primaryDial = primaryDial,
+        primaryDial = {
+            androidx.compose.ui.layout.Layout(content = primaryDial) { measurable, constraints ->
+                val placeable = measurable.first().measure(constraints)
+                layout(placeable.width, placeable.height) {
+                    placeable.place(offsetX.roundToPx(), offsetY.roundToPx())
+                }
+            }
+        },
         secondaryDials = secondaryDials,
         primaryDialMaxSize = 160.dp * interpolatedDialSize,
         secondaryDialsBaseRotationInDegrees = settings.rotation * TouchControllerSettingsManager.MAX_ROTATION,
@@ -57,15 +71,29 @@ fun BaseLayoutRight(
     secondaryDials: @Composable LayoutRadialSecondaryDialsScope.() -> Unit,
 ) {
     val g = groupSettings ?: TouchControllerSettingsManager.ButtonGroupSettings()
+    // Clamp padding to prevent negative values from crashing
+    // offsetX/Y applied via layout offset to primaryDial only (secondary dials stay in place)
+    val rightPadding = maxOf(0f, settings.marginX)
+    val bottomPadding = maxOf(0f, settings.marginY)
+    val offsetX = (TouchControllerSettingsManager.MAX_MARGINS * g.offsetX).dp
+    val offsetY = (TouchControllerSettingsManager.MAX_MARGINS * g.offsetY).dp
+
     LayoutRadial(
         modifier =
             modifier
                 .absolutePadding(
-                    right = TouchControllerSettingsManager.MAX_MARGINS.dp * (settings.marginX + g.offsetX),
-                    bottom = TouchControllerSettingsManager.MAX_MARGINS.dp * (settings.marginY + g.offsetY),
+                    right = TouchControllerSettingsManager.MAX_MARGINS.dp * rightPadding,
+                    bottom = TouchControllerSettingsManager.MAX_MARGINS.dp * bottomPadding,
                 )
                 .padding(LocalLemuroidPadTheme.current.padding),
-        primaryDial = primaryDial,
+        primaryDial = {
+            androidx.compose.ui.layout.Layout(content = primaryDial) { measurable, constraints ->
+                val placeable = measurable.first().measure(constraints)
+                layout(placeable.width, placeable.height) {
+                    placeable.place(offsetX.roundToPx(), offsetY.roundToPx())
+                }
+            }
+        },
         secondaryDials = secondaryDials,
         primaryDialMaxSize =
             160.dp *
