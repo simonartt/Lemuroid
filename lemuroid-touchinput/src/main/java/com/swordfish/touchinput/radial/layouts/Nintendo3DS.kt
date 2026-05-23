@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
-import com.swordfish.touchinput.controller.R
-import com.swordfish.touchinput.radial.controls.LemuroidControlButton
 import com.swordfish.touchinput.radial.controls.LemuroidControlCross
 import com.swordfish.touchinput.radial.controls.LemuroidControlFaceButtons
 import com.swordfish.touchinput.radial.layouts.shared.ComposeTouchLayouts
@@ -43,7 +41,7 @@ fun PadKitScope.Nintendo3DSLeft(
             TweakableButton(id = TouchButtonId.SELECT, settings = settings) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
             TweakableButton(id = TouchButtonId.MENU, settings = settings) { mod -> SecondaryButtonMenuPlaceholder(settings = settings, modifier = mod) }
             TweakableButton(id = TouchButtonId.THUMBL, settings = settings) { mod ->
-                SecondaryAnalogLeft()
+                SecondaryAnalogLeft(modifier = mod)
             }
         },
     )
@@ -81,14 +79,6 @@ fun PadKitScope.Nintendo3DSRight(
         secondaryDials = {
             TweakableButton(id = TouchButtonId.R, settings = settings) { mod -> SecondaryButtonR(modifier = mod) }
             TweakableButton(id = TouchButtonId.START, settings = settings) { mod -> SecondaryButtonStart(position = 2, modifier = mod) }
-            // THUMBR = 右摇杆（3DS 专属）
-            TweakableButton(id = TouchButtonId.THUMBR, settings = settings) { mod ->
-                LemuroidControlButton(
-                    modifier = mod.then(Modifier.radialPosition(+80f - 180f).radialScale(2.2f)),
-                    id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
-                    icon = R.drawable.button_stick,
-                )
-            }
             TweakableButton(id = TouchButtonId.L2, settings = settings) { mod ->
                 SecondaryButtonMenu(settings = settings, modifier = mod)
             }
