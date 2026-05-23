@@ -1,61 +1,83 @@
-# Lemuroid
+# Lemuroid — 定制版
 
-[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
-     alt="Get it on F-Droid"
-     height="80">](https://f-droid.org/packages/com.swordfish.lemuroid/)
-[<img src="https://play.google.com/intl/en_us/badges/images/generic/en-play-badge.png"
-     alt="Get it on Google Play"
-     height="80">](https://play.google.com/store/apps/details?id=com.swordfish.lemuroid)
+> ⚠️ 这是一个 **VibeCoding** 项目，由 AI 辅助开发，非官方原版。
 
-## Description
+基于 [Lemuroid](https://github.com/Swordfish90/Lemuroid) 开源项目的定制修改版本，主要面向 NDS 模拟器（melonDS / DeSmuME）的增强和中文本地化支持。
 
-Lemuroid is an open-source emulation project for Android based on Libretro. Its main goal is ease of use, good Android integration and a great user experience.
+原版 Lemuroid 是一个基于 Libretro 的 Android 多平台模拟器，支持 NES、SNES、GBA、NDS、PS1、PSP 等数十种游戏机。
 
-It originated from a rib of [Retrograde](https://github.com/retrograde/retrograde-android), but graduated to a standalone project integrating [LibretroDroid](https://github.com/Swordfish90/LibretroDroid).
+---
 
-|Screen 1|Screen 2|Screen 3|
-|---|---|---|
-|![Screen1](https://github.com/Swordfish90/Lemuroid/blob/master/fastlane/metadata/android/en-US/images/phoneScreenshots/1.jpg)|![Screen2](https://github.com/Swordfish90/Lemuroid/blob/master/fastlane/metadata/android/en-US/images/phoneScreenshots/2.jpg)|![Screen3](https://github.com/Swordfish90/Lemuroid/blob/master/fastlane/metadata/android/en-US/images/phoneScreenshots/3.jpg)|
+## 定制改动记录
 
-### Supported Systems:
-- Atari 2600 (A26) ([stella](https://docs.libretro.com/library/stella/))
-- Atari 7800 (A78) ([prosystem](https://docs.libretro.com/library/prosystem/))
-- Atari Lynx (Lynx) ([handy](https://docs.libretro.com/library/handy/))
-- Nintendo (NES) ([fceumm](https://docs.libretro.com/library/fceumm/))
-- Super Nintendo (SNES) ([snes9x](https://docs.libretro.com/library/snes9x/))
-- Game Boy (GB) ([gambatte](https://docs.libretro.com/library/gambatte/))
-- Game Boy Color (GBC) ([gambatte](https://docs.libretro.com/library/gambatte/))
-- Game Boy Advance (GBA) ([mgba](https://docs.libretro.com/library/mgba/))
-- Sega Genesis (aka Megadrive) ([genesis_plus_gx](https://docs.libretro.com/library/genesis_plus_gx/))
-- Sega CD (aka Mega CD) ([genesis_plus_gx](https://docs.libretro.com/library/genesis_plus_gx/))
-- Sega Master System (SMS) ([genesis_plus_gx](https://docs.libretro.com/library/genesis_plus_gx/))
-- Sega Game Gear (GG) ([genesis_plus_gx](https://docs.libretro.com/library/genesis_plus_gx/))
-- Nintendo 64 (N64) ([mupen64plus](https://docs.libretro.com/library/mupen64plus/))
-- PlayStation (PSX) ([PCSX-ReARMed](https://docs.libretro.com/library/pcsx_rearmed/))
-- PlayStation Portable (PSP) ([ppsspp](https://docs.libretro.com/library/ppsspp/))
-- FinalBurn Neo (Arcade) ([fbneo](https://github.com/libretro/FBNeo/))
-- Nintendo DS (NDS) ([desmume](https://docs.libretro.com/library/desmume/)/[MelonDS](https://docs.libretro.com/library/melonds/))
-- NEC PC Engine (PCE) ([beetle_pce_fast](https://docs.libretro.com/library/beetle_pce_fast/))
-- Neo Geo Pocket (NGP) ([mednafen_ngp](https://docs.libretro.com/library/beetle_neopop/))
-- Neo Geo Pocket Color (NGC) ([mednafen_ngp](https://docs.libretro.com/library/beetle_neopop/))
-- WonderSwan (WS) ([beetle_cygne](https://docs.libretro.com/library/beetle_cygne/))
-- WonderSwan Color (WSC) ([beetle_cygne](https://docs.libretro.com/library/beetle_cygne/))
-- Nintendo 3DS (3DS) ([citra](https://docs.libretro.com/library/citra/))
+详见 [CHANGELOG_MODS.md](CHANGELOG_MODS.md)
 
-### Features:
-- Android TV support
-- Automatically save and restore game states.
-- ROMs scanning and indexing
-- Optimized touch controls
-- Quick save/load
-- Support for Zipped ROMs
-- Display simulation (LCD/CRT)
-- Gamepad support
-- Local multiplayer
-- Tilt input
-- Customizable touch controls (size and position)
-- Cloud save sync
-- HD mode
+### v1.1 — 2026-05-22
 
-### Languages:
-You can help translate Lemuroid in your native language by going here: https://crowdin.com/project/lemuroid
+#### NDS 双屏交换按钮
+- 右侧触摸按键区新增屏幕交换按钮（↕），可一键切换上下屏布局
+- 支持 melonDS 和 DeSmuME 双核心
+- 通过切换模拟器配置变量实现（`melonds_screen_layout1` / `desmume_screens_layout`）
+
+#### 虚拟按键手动开关
+- 游戏菜单新增「虚拟按键」开关，可随时隐藏/显示触摸控制器
+- 隐藏后右上角出现悬浮菜单按钮，点击可打开游戏菜单
+- 解决了连接蓝牙手柄后触摸控制器自动隐藏但无法手动恢复的问题
+
+### v1.0 — 2026-05-18
+
+#### 构建环境适配
+- 添加阿里云 Maven 镜像，解决国内网络构建超时问题
+- 注释掉 baselineprofile 模块，解决依赖解析失败
+- 添加 SDK compileSdk 35 兼容支持
+
+#### NDS 存档兼容性增强（.sav 支持）
+- 原版只支持 `.srm` 存档，现优先读取 `.sav` 格式（烧录卡 / DraStic 存档）
+- 自动裁剪超大存档文件（>1MB），适配 melonDS 模拟器
+
+### 尚未完成的功能
+
+- **游戏画面垂直对齐**：代码已写入（设置界面 + 布局逻辑），但实际对齐效果尚未正确实现，待后续修复。设置项可见但不会真正改变画面位置。
+
+---
+
+## 支持的系统
+
+| 系统 | 核心 |
+|------|------|
+| Nintendo DS (NDS) | melonDS（主力）/ DeSmuME |
+| Game Boy Advance (GBA) | mgba |
+| Nintendo (NES) | fceumm |
+| Super Nintendo (SNES) | snes9x |
+| PlayStation (PSX) | PCSX-ReARMed |
+| PlayStation Portable (PSP) | ppsspp |
+| Nintendo 64 (N64) | mupen64plus |
+| Sega Genesis / CD / Master System / Game Gear | genesis_plus_gx |
+| 其他 | GB/GBC, N64, 3DS, Arcade(FBNEO), PCE, NGP/NGC, WS/WSC, Atari 等 |
+
+---
+
+## 构建
+
+```bash
+export JAVA_HOME=/Users/simon/.hermes/android-env/jdk/Contents/Home
+./gradlew :lemuroid-app:assembleFreeDynamicRelease
+```
+
+APK 输出：`lemuroid-app/build/outputs/apk/freeDynamic/release/lemuroid-app-free-dynamic-release.apk`
+
+---
+
+## 存档路径
+
+```
+Android/data/com.swordfish.lemuroid/files/saves/
+```
+
+---
+
+## 原版项目
+
+- [Lemuroid (GitHub)](https://github.com/Swordfish90/Lemuroid)
+- [F-Droid](https://f-droid.org/packages/com.swordfish.lemuroid/)
+- [Google Play](https://play.google.com/store/apps/details?id=com.swordfish.lemuroid)

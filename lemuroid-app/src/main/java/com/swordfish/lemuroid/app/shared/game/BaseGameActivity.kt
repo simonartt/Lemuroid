@@ -217,6 +217,10 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                 this.putExtra(GameMenuContract.EXTRA_CURRENT_TILT_CONFIG, currentTiltConfiguration)
                 // TODO PADS... Make sure to avoid passing this if a physical pad is connected.
                 this.putExtra(GameMenuContract.EXTRA_TILT_ALL_CONFIGS, tiltConfigurations.toTypedArray())
+                this.putExtra(
+                    GameMenuContract.EXTRA_TOUCH_CONTROLS_ENABLED,
+                    baseGameScreenViewModel.isTouchControllerVisibleValue(),
+                )
             }
         startActivityForResult(intent, DIALOG_REQUEST)
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
@@ -408,6 +412,10 @@ abstract class BaseGameActivity : ImmersiveActivity() {
             }
             if (data?.getBooleanExtra(GameMenuContract.RESULT_EDIT_TOUCH_CONTROLS, false) == true) {
                 baseGameScreenViewModel.showEditControls(true)
+            }
+            if (data?.hasExtra(GameMenuContract.RESULT_TOGGLE_TOUCH_CONTROLS) == true) {
+                val enabled = data.getBooleanExtra(GameMenuContract.RESULT_TOGGLE_TOUCH_CONTROLS, true)
+                baseGameScreenViewModel.setTouchControllerVisible(enabled)
             }
             if (data?.hasExtra(GameMenuContract.RESULT_CHANGE_TILT_CONFIG) == true) {
                 val tiltConfig = data.serializable<TiltConfiguration>(GameMenuContract.RESULT_CHANGE_TILT_CONFIG)

@@ -229,6 +229,18 @@ class BaseGameScreenViewModel(
         return touchControls.isTouchControllerVisible()
     }
 
+    fun isTouchControllerVisibleValue(): Boolean {
+        return touchControls.isTouchControllerVisibleValue()
+    }
+
+    fun setTouchControllerVisible(enabled: Boolean) {
+        touchControls.setTouchControllerVisible(enabled)
+    }
+
+    fun showGameMenu() {
+        touchControls.showGameMenu()
+    }
+
     fun getTouchControllerConfig(): Flow<ControllerConfig> {
         return touchControls.getTouchControllerConfig()
     }

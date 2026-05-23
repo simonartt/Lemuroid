@@ -50,6 +50,8 @@ class GameViewModelTouchControls(
     private val menuPressed = MutableStateFlow(false)
     private val showEditControls = MutableStateFlow(false)
     private val hapticFeedbackMode = MutableStateFlow(HapticFeedbackMode.NONE)
+    // Manual toggle for virtual controls visibility, decoupled from gamepad connection
+    private val virtualControlsEnabled = MutableStateFlow(true)
 
     private var loadingMenuJob: Job? = null
 
@@ -107,8 +109,15 @@ class GameViewModelTouchControls(
     }
 
     fun isTouchControllerVisible(): Flow<Boolean> {
-        return inputs.getEnabledInputDevices()
-            .map { it.isEmpty() }
+        return virtualControlsEnabled
+    }
+
+    fun isTouchControllerVisibleValue(): Boolean {
+        return virtualControlsEnabled.value
+    }
+
+    fun setTouchControllerVisible(enabled: Boolean) {
+        virtualControlsEnabled.value = enabled
     }
 
     fun getTouchControllerConfig(): Flow<ControllerConfig> {
@@ -180,6 +189,10 @@ class GameViewModelTouchControls(
 
     fun isMenuPressed(): Flow<Boolean> {
         return menuPressed
+    }
+
+    fun showGameMenu() {
+        sideEffects.showMenu(tilt, inputs)
     }
 
     fun isEditControlsShown(): Flow<Boolean> {

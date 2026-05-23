@@ -141,6 +141,20 @@ fun GameMenuHomeScreen(
             },
         )
 
+        LemuroidSettingsSwitch(
+            title = { Text(text = stringResource(id = R.string.game_menu_virtual_controls)) },
+            icon = {
+                Icon(
+                    painterResource(R.drawable.ic_menu_controls),
+                    contentDescription = stringResource(id = R.string.game_menu_virtual_controls),
+                )
+            },
+            state = rememberMemoryBooleanSettingState(gameMenuRequest.touchControlsEnabled),
+            onCheckedChange = {
+                onResult { putExtra(GameMenuContract.RESULT_TOGGLE_TOUCH_CONTROLS, it) }
+            },
+        )
+
         if (gameMenuRequest.advancedCoreOptions.isNotEmpty() || gameMenuRequest.coreOptions.isNotEmpty()) {
             LemuroidSettingsMenuLink(
                 title = { Text(text = stringResource(id = R.string.game_menu_settings)) },

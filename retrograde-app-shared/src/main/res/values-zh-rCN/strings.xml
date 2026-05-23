@@ -54,6 +54,10 @@
     <string name="setting_melonds_threaded_renderer">多线程渲染</string>
     <string name="setting_melonds_jit_enable">动态重编译器</string>
     <string name="setting_melonds_mic_input">麦克风模式</string>
+    <string name="settings_title_game_view_vertical_align">游戏画面垂直对齐</string>
+    <string name="settings_description_game_view_vertical_align">使用手柄时，将游戏画面对齐到屏幕顶部</string>
+    <string name="game_view_align_center">居中</string>
+    <string name="game_view_align_top">靠上</string>
     <string name="setting_wswan_rotate_display">屏幕方向</string>
     <string name="setting_wswan_mono_palette">着色</string>
     <string name="setting_handy_rot">显示旋转</string>
