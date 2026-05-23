@@ -193,21 +193,22 @@ object GameScreenLayout {
             val leftContainer = createRefFor(CONSTRAINTS_LEFT_CONTAINER)
             val rightContainer = createRefFor(CONSTRAINTS_RIGHT_CONTAINER)
 
-            // In top-align mode, gameView uses wrapContent height and anchors to top
+            // Top-align: gameView is an empty Box (used only as a position anchor).
+            // Its wrapContent height = 0, so leftPad/rightPad collapse to top.
+            // left/right containers stretch full height for actual touch areas.
+            constrain(gameView) {
+                width = Dimension.fillToConstraints
+                height = Dimension.wrapContent
+                absoluteLeft.linkTo(parent.absoluteLeft)
+                absoluteRight.linkTo(parent.absoluteRight)
+                top.linkTo(parent.top)
+            }
+
             constrain(leftPad) {
                 absoluteLeft.linkTo(parent.absoluteLeft)
                 top.linkTo(gameView.top)
                 bottom.linkTo(gameView.bottom)
                 width = Dimension.wrapContent
-            }
-
-            constrain(gameView) {
-                width = Dimension.fillToConstraints
-                height = Dimension.wrapContent
-                absoluteLeft.linkTo(leftPad.absoluteRight)
-                absoluteRight.linkTo(rightPad.absoluteLeft)
-                top.linkTo(parent.top)
-                width = Dimension.fillToConstraints
             }
 
             constrain(rightPad) {
@@ -218,10 +219,12 @@ object GameScreenLayout {
             }
 
             constrain(gameContainer) {
-                absoluteLeft.linkTo(gameView.absoluteLeft)
-                absoluteRight.linkTo(gameView.absoluteRight)
-                top.linkTo(gameView.top)
-                bottom.linkTo(gameView.bottom)
+                width = Dimension.fillToConstraints
+                height = Dimension.fillToConstraints
+                absoluteLeft.linkTo(parent.absoluteLeft)
+                absoluteRight.linkTo(parent.absoluteRight)
+                top.linkTo(parent.top)
+                bottom.linkTo(parent.bottom)
             }
 
             constrain(leftContainer) {
