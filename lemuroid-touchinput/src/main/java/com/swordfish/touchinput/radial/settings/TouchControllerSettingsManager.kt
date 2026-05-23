@@ -23,6 +23,11 @@ class TouchControllerSettingsManager(private val sharedPreferences: SharedPrefer
         LANDSCAPE,
     }
 
+    enum class TouchButtonId(val label: String) {
+        DPAD("方向键"), L("L"), L2("麦克风"), SELECT("Select"), THUMBL("关屏"),
+        FACE("Y/X/A/B"), R("R"), START("Start"), MENU("菜单"), THUMBR("换屏")
+    }
+
     @Serializable
     data class ButtonGroupSettings(
         val scale: Float = 1.0f,
@@ -41,14 +46,14 @@ class TouchControllerSettingsManager(private val sharedPreferences: SharedPrefer
         val rotation: Float = DEFAULT_ROTATION,
         val marginX: Float = DEFAULT_MARGIN_X,
         val marginY: Float = DEFAULT_MARGIN_Y,
-        // Per-group button customization
-        val dpadSettings: ButtonGroupSettings = ButtonGroupSettings(),
-        val faceButtonsSettings: ButtonGroupSettings = ButtonGroupSettings(),
+        // Per-button independent settings
+        val buttonSettings: Map<String, ButtonGroupSettings> = emptyMap(),
     ) {
-        fun withDpadSettings(s: ButtonGroupSettings) = copy(dpadSettings = s)
-        fun withFaceButtonsSettings(s: ButtonGroupSettings) = copy(faceButtonsSettings = s)
-        fun resetDpad() = copy(dpadSettings = ButtonGroupSettings())
-        fun resetFaceButtons() = copy(faceButtonsSettings = ButtonGroupSettings())
+        fun getButtonSettings(id: TouchButtonId) = buttonSettings[id.name] ?: ButtonGroupSettings()
+        fun setButtonSettings(id: TouchButtonId, s: ButtonGroupSettings) = copy(buttonSettings = buttonSettings + (id.name to s))
+        // Legacy fields kept for backward compat
+        val dpadSettings: ButtonGroupSettings get() = getButtonSettings(TouchButtonId.DPAD)
+        val faceButtonsSettings: ButtonGroupSettings get() = getButtonSettings(TouchButtonId.FACE)
     }
 
     private fun computeInsetsPaddings(

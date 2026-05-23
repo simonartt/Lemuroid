@@ -19,6 +19,7 @@ import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSaves
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSideEffects
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTilt
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls
+import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
 import com.swordfish.lemuroid.app.shared.input.InputDeviceManager
 import com.swordfish.lemuroid.app.shared.rumble.RumbleManager
 import com.swordfish.lemuroid.app.shared.settings.ControllerConfigsManager
@@ -205,8 +206,8 @@ class BaseGameScreenViewModel(
         retroGameView.initialize(applicationContext, game, systemCoreConfig, gameLoader, requestLoadSave)
     }
 
-    fun showEditControls(show: Boolean) {
-        touchControls.showEditControls(show)
+    fun toggleEditControls(show: Boolean) {
+        touchControls.toggleEditControls(show)
     }
 
     fun isEditControlShown(): Flow<Boolean> {
@@ -217,32 +218,17 @@ class BaseGameScreenViewModel(
         touchControls.updateTouchControllerSettings(touchControllerSettings)
     }
 
-    fun resetDpadSettings() {
-        touchControls.resetDpadSettings()
-    }
-
-    fun resetFaceButtonsSettings() {
-        touchControls.resetFaceButtonsSettings()
-    }
-
-    fun getEditingSelection(): Flow<GameViewModelTouchControls.EditTarget> =
-        touchControls.getEditingSelection()
-
-    fun selectEditTarget(target: GameViewModelTouchControls.EditTarget) {
-        touchControls.selectEditTarget(target)
-    }
-
-    fun updateDpadOffset(dx: Float, dy: Float) {
-        touchControls.updateDpadOffset(dx, dy)
-    }
-
-    fun updateFaceOffset(dx: Float, dy: Float) {
-        touchControls.updateFaceOffset(dx, dy)
-    }
-
     fun resetTouchControls() {
         touchControls.resetTouchControls()
     }
+
+    // Per-button editing
+    fun getEditingSelection(): Flow<TouchButtonId?> = touchControls.getEditingSelection()
+    fun selectEditTarget(target: TouchButtonId) { touchControls.selectEditTarget(target) }
+    fun cycleEditTarget(direction: Int) { touchControls.cycleEditTarget(direction) }
+    fun updateButtonOffset(id: TouchButtonId, dx: Float, dy: Float) { touchControls.updateButtonOffset(id, dx, dy) }
+    fun updateButtonScale(id: TouchButtonId, newScale: Float) { touchControls.updateButtonScale(id, newScale) }
+    fun resetButtonSettings(id: TouchButtonId) { touchControls.resetButtonSettings(id) }
 
     fun onScreenOrientationChanged(orientation: TouchControllerSettingsManager.Orientation) {
         touchControls.updateScreenOrientation(orientation)

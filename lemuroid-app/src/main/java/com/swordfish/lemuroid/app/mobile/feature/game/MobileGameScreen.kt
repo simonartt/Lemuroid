@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Height
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.OpenInFull
@@ -49,7 +51,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -65,6 +66,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.swordfish.lemuroid.app.shared.game.BaseGameScreenViewModel
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls.Companion.MENU_LOADING_ANIMATION_MILLIS
+import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
+import com.swordfish.touchinput.radial.layouts.LocalButtonEdit
 import com.swordfish.lemuroid.app.shared.settings.HapticFeedbackMode
 import com.swordfish.lemuroid.lib.controller.ControllerConfig
 import com.swordfish.touchinput.controller.R
@@ -263,16 +266,18 @@ private fun GameScreenRunningCentralMenu(
     controllerConfig: ControllerConfig,
 ) {
     val menuPressed = viewModel.isMenuPressed().collectAsState(false)
-    Box(
-        modifier = modifier.wrapContentSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        LemuroidButtonPressFeedback(
-            pressed = menuPressed.value,
-            animationDurationMillis = MENU_LOADING_ANIMATION_MILLIS,
-            icon = R.drawable.button_menu,
-        )
-        MenuEditTouchControls(viewModel, controllerConfig, touchControllerSettings)
+    CompositionLocalProvider(LocalButtonEdit provides { target -> viewModel.selectEditTarget(target) }) {
+        Box(
+            modifier = modifier.wrapContentSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            LemuroidButtonPressFeedback(
+                pressed = menuPressed.value,
+                animationDurationMillis = MENU_LOADING_ANIMATION_MILLIS,
+                icon = R.drawable.button_menu,
+            )
+            MenuEditTouchControls(viewModel, controllerConfig, touchControllerSettings)
+        }
     }
 }
 
@@ -283,133 +288,80 @@ private fun MenuEditTouchControls(
     touchControllerSettings: TouchControllerSettingsManager.Settings,
 ) {
     val showEditControls = viewModel.isEditControlShown().collectAsState(false)
-    val editingTarget = viewModel.getEditingSelection().collectAsState(GameViewModelTouchControls.EditTarget.NONE)
+    val selectedButton = viewModel.getEditingSelection().collectAsState(null)
     if (!showEditControls.value) return
 
-    val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    val displayWidth = with(density) { LocalContext.current.resources.displayMetrics.widthPixels / density.density }
+    val allButtons = TouchButtonId.values().toList()
 
-    // Full-screen drag overlay for selecting & dragging buttons
-    Box(
+    // === TOP TOOLBAR (doesn't block buttons) ===
+    Card(
         modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        // Tap to select: left half = dpad, right half = face
-                        val target = if (offset.x < displayWidth / 2f)
-                            GameViewModelTouchControls.EditTarget.DPAD
-                        else
-                            GameViewModelTouchControls.EditTarget.FACE
-                        viewModel.selectEditTarget(target)
-                    },
-                    onDragEnd = { },
-                    onDragCancel = { },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        // Drag moves the selected button
-                        val dx = with(density) { (dragAmount.x / TouchControllerSettingsManager.MAX_MARGINS.dp.toPx()) }
-                        val dy = with(density) { (dragAmount.y / TouchControllerSettingsManager.MAX_MARGINS.dp.toPx()) }
-                        when (editingTarget.value) {
-                            GameViewModelTouchControls.EditTarget.DPAD -> viewModel.updateDpadOffset(dx, dy)
-                            GameViewModelTouchControls.EditTarget.FACE -> viewModel.updateFaceOffset(dx, dy)
-                            else -> {}
-                        }
-                    },
-                )
-            },
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        // Highlight the selected button area
-        when (editingTarget.value) {
-            GameViewModelTouchControls.EditTarget.DPAD -> {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .fillMaxSize(0.5f)
-                        .background(Color(0x2000D4AA)),
-                )
-            }
-            GameViewModelTouchControls.EditTarget.FACE -> {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .fillMaxSize(0.5f)
-                        .background(Color(0x2000D4AA)),
-                )
-            }
-            else -> {}
-        }
-
-        // Floating edit panel at bottom center
-        Card(
+        Column(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+            // Button selector row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Selected target label
-                val label = when (editingTarget.value) {
-                    GameViewModelTouchControls.EditTarget.DPAD -> "方向键 (D-Pad)"
-                    GameViewModelTouchControls.EditTarget.FACE -> "功能键 (Y/X/A/B)"
-                    else -> "点击屏幕选择要调整的按键"
+                TextButton(onClick = { viewModel.cycleEditTarget(-1) }) {
+                    Text("◀")
                 }
-                Text(text = label, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                val btnLabel = selectedButton.value?.label ?: "点击按键选择"
+                Text(text = btnLabel, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                TextButton(onClick = { viewModel.cycleEditTarget(1) }) {
+                    Text("▶")
+                }
+            }
 
-                if (editingTarget.value != GameViewModelTouchControls.EditTarget.NONE) {
-                    // Size slider
-                    MenuEditTouchControlRow(Icons.Default.OpenInFull, "大小", 0f) {
-                        Slider(
-                            value = when (editingTarget.value) {
-                                GameViewModelTouchControls.EditTarget.DPAD -> touchControllerSettings.dpadSettings.scale
-                                GameViewModelTouchControls.EditTarget.FACE -> touchControllerSettings.faceButtonsSettings.scale
-                                else -> 1f
-                            },
-                            onValueChange = { newScale ->
-                                val newSettings = when (editingTarget.value) {
-                                    GameViewModelTouchControls.EditTarget.DPAD ->
-                                        touchControllerSettings.copy(dpadSettings = touchControllerSettings.dpadSettings.copy(scale = newScale))
-                                    GameViewModelTouchControls.EditTarget.FACE ->
-                                        touchControllerSettings.copy(faceButtonsSettings = touchControllerSettings.faceButtonsSettings.copy(scale = newScale))
-                                    else -> touchControllerSettings
-                                }
-                                viewModel.updateTouchControllerSettings(newSettings)
-                            },
-                            valueRange = 0.5f..2f,
-                        )
-                    }
+            if (selectedButton.value != null) {
+                val id = selectedButton.value!!
+                val bs = touchControllerSettings.getButtonSettings(id)
 
-                    // Reset button for selected target
-                    TextButton(
-                        onClick = {
-                            when (editingTarget.value) {
-                                GameViewModelTouchControls.EditTarget.DPAD -> viewModel.resetDpadSettings()
-                                GameViewModelTouchControls.EditTarget.FACE -> viewModel.resetFaceButtonsSettings()
-                                else -> {}
-                            }
+                // Size slider
+                MenuEditTouchControlRow(Icons.Default.OpenInFull, "大小", 0f) {
+                    Slider(
+                        value = bs.scale,
+                        onValueChange = { viewModel.updateButtonScale(id, it) },
+                        valueRange = 0.5f..2f,
+                    )
+                }
+                // Offset X
+                MenuEditTouchControlRow(Icons.AutoMirrored.Filled.ArrowBack, "水平", 0f) {
+                    Slider(
+                        value = bs.offsetX,
+                        onValueChange = {
+                            viewModel.updateButtonOffset(id, it - bs.offsetX, 0f)
                         },
-                    ) {
-                        Text(text = "复位")
-                    }
+                        valueRange = -3f..3f,
+                    )
                 }
-
-                // Bottom row: reset all + done
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    TextButton(onClick = { viewModel.resetTouchControls() }) {
-                        Text(text = "全部复位")
-                    }
-                    TextButton(onClick = { viewModel.showEditControls(false) }) {
-                        Text(text = "完成")
-                    }
+                // Offset Y
+                MenuEditTouchControlRow(Icons.Default.ArrowDownward, "垂直", 0f) {
+                    Slider(
+                        value = bs.offsetY,
+                        onValueChange = {
+                            viewModel.updateButtonOffset(id, 0f, it - bs.offsetY)
+                        },
+                        valueRange = -3f..3f,
+                    )
+                }
+                // Reset & Done
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = { viewModel.resetButtonSettings(id) }) { Text("复位此按键") }
+                    TextButton(onClick = { viewModel.toggleEditControls(false) }) { Text("完成") }
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    TextButton(onClick = { viewModel.resetTouchControls() }) { Text("全部复位") }
+                    TextButton(onClick = { viewModel.toggleEditControls(false) }) { Text("完成") }
                 }
             }
         }

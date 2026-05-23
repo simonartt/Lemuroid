@@ -16,6 +16,9 @@ import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonR
 import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonSelect
 import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonStart
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
+import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
+import com.swordfish.touchinput.radial.layouts.LocalButtonEdit
+import com.swordfish.touchinput.radial.layouts.TweakableButton
 import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
 import gg.padkit.PadKitScope
 import gg.padkit.ids.Id
@@ -29,23 +32,30 @@ fun PadKitScope.DesmumeLeft(
 ) {
     BaseLayoutLeft(
         settings = settings,
-        groupSettings = settings.dpadSettings,
         modifier = modifier,
-        primaryDial = { LemuroidControlCross(id = Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD)) },
+        primaryDial = {
+            TweakableButton(TouchButtonId.DPAD, settings) {
+                LemuroidControlCross(id = Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD))
+            }
+        },
         secondaryDials = {
-            SecondaryButtonL()
-            SecondaryButtonSelect(position = 2)
-            SecondaryButtonMenuPlaceholder(settings)
-            LemuroidControlButton(
-                modifier = Modifier.radialPosition(-120f),
-                id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBL),
-                icon = R.drawable.button_mic,
-            )
-            LemuroidControlButton(
-                modifier = Modifier.radialPosition(-60f),
-                id = Id.Key(KeyEvent.KEYCODE_BUTTON_L2),
-                icon = R.drawable.button_close_screen,
-            )
+            TweakableButton(TouchButtonId.L, settings) { SecondaryButtonL() }
+            TweakableButton(TouchButtonId.SELECT, settings) { SecondaryButtonSelect(position = 2) }
+            TweakableButton(TouchButtonId.MENU, settings) { SecondaryButtonMenuPlaceholder(settings) }
+            TweakableButton(TouchButtonId.THUMBL, settings) {
+                LemuroidControlButton(
+                    modifier = Modifier.radialPosition(-120f),
+                    id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBL),
+                    icon = R.drawable.button_mic,
+                )
+            }
+            TweakableButton(TouchButtonId.L2, settings) {
+                LemuroidControlButton(
+                    modifier = Modifier.radialPosition(-60f),
+                    id = Id.Key(KeyEvent.KEYCODE_BUTTON_L2),
+                    icon = R.drawable.button_close_screen,
+                )
+            }
         },
     )
 }
@@ -57,35 +67,38 @@ fun PadKitScope.DesmumeRight(
 ) {
     BaseLayoutRight(
         settings = settings,
-        groupSettings = settings.faceButtonsSettings,
         modifier = modifier,
         primaryDial = {
-            LemuroidControlFaceButtons(
-                ids =
-                    persistentListOf(
-                        Id.Key(KeyEvent.KEYCODE_BUTTON_A),
-                        Id.Key(KeyEvent.KEYCODE_BUTTON_B),
-                        Id.Key(KeyEvent.KEYCODE_BUTTON_Y),
-                        Id.Key(KeyEvent.KEYCODE_BUTTON_X),
-                    ),
-                idsForegrounds =
-                    persistentMapOf<Id.Key, @Composable (State<Boolean>) -> Unit>(
-                        Id.Key(KeyEvent.KEYCODE_BUTTON_A) to { LemuroidButtonForeground(pressed = it, label = "A") },
-                        Id.Key(KeyEvent.KEYCODE_BUTTON_B) to { LemuroidButtonForeground(pressed = it, label = "B") },
-                        Id.Key(KeyEvent.KEYCODE_BUTTON_Y) to { LemuroidButtonForeground(pressed = it, label = "Y") },
-                        Id.Key(KeyEvent.KEYCODE_BUTTON_X) to { LemuroidButtonForeground(pressed = it, label = "X") },
-                    ),
-            )
+            TweakableButton(TouchButtonId.FACE, settings) {
+                LemuroidControlFaceButtons(
+                    ids =
+                        persistentListOf(
+                            Id.Key(KeyEvent.KEYCODE_BUTTON_A),
+                            Id.Key(KeyEvent.KEYCODE_BUTTON_B),
+                            Id.Key(KeyEvent.KEYCODE_BUTTON_Y),
+                            Id.Key(KeyEvent.KEYCODE_BUTTON_X),
+                        ),
+                    idsForegrounds =
+                        persistentMapOf<Id.Key, @Composable (State<Boolean>) -> Unit>(
+                            Id.Key(KeyEvent.KEYCODE_BUTTON_A) to { LemuroidButtonForeground(pressed = it, label = "A") },
+                            Id.Key(KeyEvent.KEYCODE_BUTTON_B) to { LemuroidButtonForeground(pressed = it, label = "B") },
+                            Id.Key(KeyEvent.KEYCODE_BUTTON_Y) to { LemuroidButtonForeground(pressed = it, label = "Y") },
+                            Id.Key(KeyEvent.KEYCODE_BUTTON_X) to { LemuroidButtonForeground(pressed = it, label = "X") },
+                        ),
+                )
+            }
         },
         secondaryDials = {
-            SecondaryButtonR()
-            SecondaryButtonStart(position = 2)
-            SecondaryButtonMenu(settings)
-            LemuroidControlButton(
-                modifier = Modifier.radialPosition(-120f),
-                id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
-                icon = R.drawable.button_swap_screens,
-            )
+            TweakableButton(TouchButtonId.R, settings) { SecondaryButtonR() }
+            TweakableButton(TouchButtonId.START, settings) { SecondaryButtonStart(position = 2) }
+            TweakableButton(TouchButtonId.MENU, settings) { SecondaryButtonMenu(settings) }
+            TweakableButton(TouchButtonId.THUMBR, settings) {
+                LemuroidControlButton(
+                    modifier = Modifier.radialPosition(-120f),
+                    id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
+                    icon = R.drawable.button_swap_screens,
+                )
+            }
         },
     )
 }

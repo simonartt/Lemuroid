@@ -18,6 +18,7 @@ import com.swordfish.libretrodroid.GLRetroView.Companion.MOTION_SOURCE_DPAD
 import com.swordfish.touchinput.radial.layouts.shared.ComposeTouchLayouts
 import com.swordfish.touchinput.radial.settings.TouchControllerID
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
+import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
 import gg.padkit.inputevents.InputEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,10 +54,6 @@ class GameViewModelTouchControls(
     private val hapticFeedbackMode = MutableStateFlow(HapticFeedbackMode.NONE)
     // Manual toggle for virtual controls visibility, decoupled from gamepad connection
     private val virtualControlsEnabled = MutableStateFlow(true)
-    // Editing: which button group is selected for drag/resize
-    private val editingSelection = MutableStateFlow<EditTarget>(EditTarget.NONE)
-
-    enum class EditTarget { NONE, DPAD, FACE }
 
     private var loadingMenuJob: Job? = null
 
@@ -100,38 +97,6 @@ class GameViewModelTouchControls(
         }
     }
 
-    fun resetDpadSettings() {
-        scope.launch {
-            val currentSettings = touchControllerSettingsManager.observeSettings(
-                touchControlId.value,
-                screenOrientation.value,
-                androidx.compose.ui.unit.Density(1f, 1f),
-                androidx.compose.foundation.layout.WindowInsets(0),
-            ).first()
-            touchControllerSettingsManager.storeSettings(
-                touchControlId.value,
-                screenOrientation.value,
-                currentSettings.copy(dpadSettings = TouchControllerSettingsManager.ButtonGroupSettings()),
-            )
-        }
-    }
-
-    fun resetFaceButtonsSettings() {
-        scope.launch {
-            val currentSettings = touchControllerSettingsManager.observeSettings(
-                touchControlId.value,
-                screenOrientation.value,
-                androidx.compose.ui.unit.Density(1f, 1f),
-                androidx.compose.foundation.layout.WindowInsets(0),
-            ).first()
-            touchControllerSettingsManager.storeSettings(
-                touchControlId.value,
-                screenOrientation.value,
-                currentSettings.copy(faceButtonsSettings = TouchControllerSettingsManager.ButtonGroupSettings()),
-            )
-        }
-    }
-
     fun resetTouchControls() {
         scope.launch {
             touchControllerSettingsManager.resetSettings(
@@ -165,6 +130,9 @@ class GameViewModelTouchControls(
     }
 
     fun handleVirtualInputEvent(events: List<InputEvent>) {
+        // Block all game input while in edit mode
+        if (editingSelection.value != null) return
+
         val menuEvent = events.firstOrNull { it is InputEvent.Button && it.id == KeyEvent.KEYCODE_BUTTON_MODE }
         if (menuEvent != null) {
             onMenuPressed((menuEvent as InputEvent.Button).pressed)
@@ -236,45 +204,68 @@ class GameViewModelTouchControls(
         return showEditControls
     }
 
-    fun showEditControls(show: Boolean) {
-        showEditControls.value = show
-        if (!show) editingSelection.value = EditTarget.NONE
-    }
+    // Editing: which button is selected for drag/resize
+    private val editingSelection = MutableStateFlow<TouchButtonId?>(null)
 
-    fun getEditingSelection(): Flow<EditTarget> = editingSelection
+    fun getEditingSelection(): Flow<TouchButtonId?> = editingSelection
 
-    fun selectEditTarget(target: EditTarget) {
+    fun selectEditTarget(target: TouchButtonId) {
         editingSelection.value = target
     }
+    fun toggleEditControls(show: Boolean) {
+        showEditControls.value = show
+        if (!show) editingSelection.value = null
+    }
 
-    fun updateDpadOffset(dx: Float, dy: Float) {
+    fun cycleEditTarget(direction: Int) {
+        val targets = TouchButtonId.values().toList()
+        val current = editingSelection.value
+        val idx = if (current == null) 0 else (targets.indexOf(current) + direction + targets.size) % targets.size
+        editingSelection.value = targets[idx]
+    }
+
+    fun updateButtonOffset(id: TouchButtonId, dx: Float, dy: Float) {
         scope.launch {
             val s = touchControllerSettingsManager.observeSettings(
                 touchControlId.value, screenOrientation.value,
                 androidx.compose.ui.unit.Density(1f, 1f),
                 androidx.compose.foundation.layout.WindowInsets(0),
             ).first()
-            val newOffsetX = (s.dpadSettings.offsetX + dx).coerceIn(-2f, 2f)
-            val newOffsetY = (s.dpadSettings.offsetY + dy).coerceIn(-2f, 2f)
+            val bs = s.getButtonSettings(id)
+            val newOx = (bs.offsetX + dx).coerceIn(-3f, 3f)
+            val newOy = (bs.offsetY + dy).coerceIn(-3f, 3f)
             touchControllerSettingsManager.storeSettings(
                 touchControlId.value, screenOrientation.value,
-                s.copy(dpadSettings = s.dpadSettings.copy(offsetX = newOffsetX, offsetY = newOffsetY)),
+                s.setButtonSettings(id, bs.copy(offsetX = newOx, offsetY = newOy)),
             )
         }
     }
 
-    fun updateFaceOffset(dx: Float, dy: Float) {
+    fun updateButtonScale(id: TouchButtonId, newScale: Float) {
         scope.launch {
             val s = touchControllerSettingsManager.observeSettings(
                 touchControlId.value, screenOrientation.value,
                 androidx.compose.ui.unit.Density(1f, 1f),
                 androidx.compose.foundation.layout.WindowInsets(0),
             ).first()
-            val newOffsetX = (s.faceButtonsSettings.offsetX + dx).coerceIn(-2f, 2f)
-            val newOffsetY = (s.faceButtonsSettings.offsetY + dy).coerceIn(-2f, 2f)
+            val bs = s.getButtonSettings(id)
             touchControllerSettingsManager.storeSettings(
                 touchControlId.value, screenOrientation.value,
-                s.copy(faceButtonsSettings = s.faceButtonsSettings.copy(offsetX = newOffsetX, offsetY = newOffsetY)),
+                s.setButtonSettings(id, bs.copy(scale = newScale)),
+            )
+        }
+    }
+
+    fun resetButtonSettings(id: TouchButtonId) {
+        scope.launch {
+            val s = touchControllerSettingsManager.observeSettings(
+                touchControlId.value, screenOrientation.value,
+                androidx.compose.ui.unit.Density(1f, 1f),
+                androidx.compose.foundation.layout.WindowInsets(0),
+            ).first()
+            touchControllerSettingsManager.storeSettings(
+                touchControlId.value, screenOrientation.value,
+                s.setButtonSettings(id, TouchControllerSettingsManager.ButtonGroupSettings()),
             )
         }
     }

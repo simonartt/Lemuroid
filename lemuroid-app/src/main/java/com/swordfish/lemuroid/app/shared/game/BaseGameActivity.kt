@@ -411,7 +411,7 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                 }
             }
             if (data?.getBooleanExtra(GameMenuContract.RESULT_EDIT_TOUCH_CONTROLS, false) == true) {
-                baseGameScreenViewModel.showEditControls(true)
+                baseGameScreenViewModel.toggleEditControls(true)
             }
             if (data?.hasExtra(GameMenuContract.RESULT_TOGGLE_TOUCH_CONTROLS) == true) {
                 val enabled = data.getBooleanExtra(GameMenuContract.RESULT_TOGGLE_TOUCH_CONTROLS, true)
