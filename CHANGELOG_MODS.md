@@ -4,6 +4,95 @@
 
 ---
 
+## v1.5 - 2026-07-27（凌晨）
+
+### 修复 v1.4 上下屏独立调节失效 + 启动画面位置异常
+
+**根因**: v1.4 的原生分屏渲染改动写在 `libretrodroid-local/` 源码里，但 app 实际依赖的是 Maven 产物 `com.github.Swordfish90:LibretroDroid:0.13.2`（本地模块从未接入 `settings.gradle.kts`），`splitViewport` 无法编译。编译失败后被临时改成"两屏矩形取并集当单 viewport"的补丁 —— 整帧仍一体渲染，导致"两屏一起动"；并集矩形叠加历史残留偏移，导致"启动画面在屏幕边缘"。
+
+**修复内容**:
+
+1. **本地模块接入构建**（关键）:
+   - `settings.gradle.kts` — 增加 `:libretrodroid`（projectDir → `libretrodroid-local/libretrodroid`）
+   - `lemuroid-app/build.gradle.kts` — 依赖改为 `implementation(project(":libretrodroid"))`
+   - 补齐本地副本缺失的子模块源码：oboe（google/oboe @ b15f5e3）、libretro-common（libretro/libretro-common @ b0c348e），与上游 0.13.2 锁定版本一致
+   - 构建环境补齐：sdkmanager 安装 `cmake;3.22.1` 与 `ndk;26.1.10909125`（原 NDK 目录为空壳）
+2. **恢复真分屏渲染**：删除"并集 viewport"补丁，`MobileGameScreen.kt` 恢复 `gameView.splitViewport` 调用。已验证：Kotlin 编译通过、字节码含 splitViewport 调用、原生 .so 含 `setSplitViewport` 导出符号
+3. **启动位置语义修正**：未保存进方案的调整改为**会话级**（重启不保留）；启动时只应用「显式选中的方案」。编辑器新增「全部重置」按钮
+
+**验证记录**: `:libretrodroid:externalNativeBuildDebug` 原生编译通过（仅上游既有警告）；`:lemuroid-app:compileFreeDynamicDebugKotlin` 通过；`nm` 验证 `liblibretrodroid.so` 含 `Java_..._setSplitViewport` 等 4 个新符号
+
+**注意**: 首次完整构建需编译 oboe + libretrodroid 全部 C++，耗时明显增加属正常
+
+---
+
+## v1.4 - 2026-07-26（深夜）
+
+### NDS 上下屏独立布局 + 手势操作 + 修复触屏失效
+
+**改动内容**:
+
+1. **上下屏独立控制**:「画面布局」编辑器中，点按画面上的虚线框（或 Card 上的"上屏/下屏"按钮）选择屏幕，独立调整其位置和大小。实现上修改了**原生渲染层**：末段 shader pass 由单次绘制改为两次（上半帧纹理/下半帧纹理各入其矩形），触摸坐标映射同步分屏适配（核心收到的坐标与整帧渲染一致，melonDS/DeSmuME 核心无需改动）。旧版整体布局数据自动迁移为双屏相同参数。
+2. **手势操作**:编辑器打开后可直接在画面上单指拖动移动选中屏、双指捏合缩放（0.5~2.0x），滑杆保留用于微调。
+3. **修复触屏失效**:删除悬浮菜单按钮的全屏透明点击层 —— 它此前吞掉所有触摸，导致关闭虚拟手柄后 NDS 触屏（下屏点击）完全失效。
+
+**修改文件**:
+- 原生（`libretrodroid-local/`）:`videolayout.h/cpp`（分屏 quad/纹理裁剪/触摸映射）、`video.h/cpp`（末段双次绘制）、`libretrodroid.h/cpp` + `libretrodroidjni.cpp` + `LibretroDroid.java`（`setSplitViewport` JNI）、`GLRetroView.kt`（`splitViewport` 属性）
+- `lemuroid-app/.../screenlayout/ScreenLayoutManager.kt` — 数据模型改为 per-screen transform + 旧数据迁移
+- `lemuroid-app/.../viewmodel/GameViewModelScreenLayout.kt`、`BaseGameScreenViewModel.kt` — 按屏更新接口
+- `lemuroid-app/.../game/MobileGameScreen.kt` — 分屏 viewport 应用、`ScreenLayoutEditorOverlay`（选屏/手势/双虚线框）、编辑器重写、删除触摸吞没层
+
+**注意**: 首次构建需重编 C++（CMake 自动进行），耗时明显增加属正常。分屏渲染按竖直堆叠（top-bottom/bottom-top）实现，暂不支持核心选项中的 left/right 横排布局。
+
+---
+
+## v1.3 - 2026-07-26（晚）
+
+### 修复 v1.2 实测问题：画面仍移动 + 布局编辑器失效
+
+**实测反馈**: ① 关闭虚拟手柄画面仍"自动居中"；② 「画面布局」滑杆拖动无效。
+
+**根因与修复**（均在 `MobileGameScreen.kt`）:
+
+1. **画面移动根因**: NDS 两个核心 `allowTouchOverlay = false`，隐藏手柄后虚拟按键退出约束布局，gameView 锚点从"手柄间区域"坍缩/撑满全屏 → 画面必然移动（横竖屏同因）。第一版只改了 TOP 对齐未处理锚点变化。**修复**: 锚点冻结 —— 隐藏手柄期间忽略锚点位置更新，沿用最后一次手柄可见时的矩形；旋转后自动重采。
+2. **滑杆拖不动根因**: 隐藏手柄时显示的 `DraggableMenuButton` 内含全屏透明点击层拦截所有触摸，而编辑层 z 序在其下方。**修复**: 编辑层（虚线预览 + 滑杆 Card）移到 `DraggableMenuButton` 之后，位于最顶层。
+3. **竖屏零反馈**: 自定义变换原限制"仅横屏"。**修复**: 取消横屏门控，横竖屏均可调；默认参数为恒等变换，未配置用户行为不变。
+
+另：viewport 应用处新增 `Timber.d` 日志（tag 过滤 `Setting game viewport`），便于实测验证。
+
+---
+
+## v1.2 - 2026-07-26
+
+### NDS 双屏布局自定义 + 修复隐藏手柄时画面移位
+
+**原因**: 横屏下关闭虚拟手柄时 NDS 双屏被强制移到屏幕顶部（`MobileGameScreen` 强制 TOP 对齐），用户期望画面保持原位，并希望能手动调整双屏位置/大小、保存多套布局方案。
+
+**修复**: 移除隐藏虚拟手柄时强制 `VerticalAlign.TOP` 的逻辑，画面恒保持居中（`GameScreenLayout` 中 TOP 布局代码保留未删）。
+
+**新增功能（仅 NDS 核心 + 横屏生效）**:
+- 游戏菜单新增「画面布局」入口（位于 Edit Controls 与 Virtual Controls 之间，仅 NDS 游戏显示）
+- 游戏内悬浮编辑 Card：水平/垂直偏移（像素）与缩放（0.5~2.0x）滑杆，实时生效，画面位置以虚线框预览
+- 布局方案管理：保存为新方案（默认名"方案 N"）、覆盖保存/重命名、切换、删除、一键重置
+- 数据持久化：JSON 存 SharedPreferences（key: `nds_screen_layout_settings`），重启保留
+- 竖屏、非 NDS 核心、未配置时的默认居中行为完全不受影响
+
+**实现原理**: 不改动渲染层。游戏画面位置由空锚点 Box 的边界归一化为 `RectF` 赋给 `GLRetroView.viewport` 决定；自定义布局在归一化前对锚点矩形做"中心缩放 + 像素平移"。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — 修复 TOP 对齐；viewport 计算应用自定义变换；新增 `MenuEditScreenLayout` 编辑界面与虚线预览
+- `lemuroid-app/.../shared/game/screenlayout/ScreenLayoutManager.kt` — **新增**，方案数据持久化管理器（仿 TouchControllerSettingsManager 模式）
+- `lemuroid-app/.../shared/game/viewmodel/GameViewModelScreenLayout.kt` — **新增**，编辑态与方案操作的 ViewModel 封装（NDS 门控）
+- `lemuroid-app/.../shared/game/BaseGameScreenViewModel.kt` — 挂载 screenLayout，新增代理方法
+- `lemuroid-app/.../shared/GameMenuContract.kt` — 新增 `RESULT_EDIT_SCREEN_LAYOUT`
+- `lemuroid-app/.../mobile/feature/gamemenu/GameMenuHomeScreen.kt` — 新增「画面布局」菜单项（仅 NDS）
+- `lemuroid-app/.../shared/game/BaseGameActivity.kt` — 处理菜单回传，打开编辑器
+- `lemuroid-app/src/main/res/values/strings.xml` — 新增 `game_menu_edit_screen_layout`
+
+**开发日志**: `log/screen-layout-dev-log.md`
+
+---
+
 ## v1.1 - 2026-05-22
 
 ### 新增：游戏画面垂直对齐设置

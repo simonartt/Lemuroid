@@ -10,10 +10,10 @@ plugins {
 
 android {
     defaultConfig {
-        versionCode = 252
+        versionCode = 253
         versionName = "1.17.0" // Always remember to update Cores Tag!
-        versionNameSuffix = "-v7-0523-91a5"
-        applicationId = "com.swordfish.lemuroid.v8"
+        versionNameSuffix = "-v8a"
+        applicationId = "com.swordfish.lemuroid.v8a"
     }
     flavorDimensions += listOf("opensource", "cores")
 
@@ -97,14 +97,16 @@ android {
             isMinifyEnabled = true
             signingConfig = signingConfigs["release"]
             proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
-            resValue("string", "lemuroid_name", "Lemuroid V8")
+            resValue("string", "lemuroid_name", "Lemuroid V8A")
             manifestPlaceholders["appIcon"] = "@mipmap/lemuroid_launcher"
             manifestPlaceholders["appIconRound"] = "@mipmap/lemuroid_launcher_round"
         }
         getByName("debug") {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-DEBUG"
-            resValue("string", "lemuroid_name", "LemuroiDebug")
+            resValue("string", "lemuroid_name", "Lemuroid V8A")
+            manifestPlaceholders["appIcon"] = "@mipmap/lemuroid_launcher"
+            manifestPlaceholders["appIconRound"] = "@mipmap/lemuroid_launcher_round"
         }
     }
 
@@ -204,7 +206,8 @@ dependencies {
     implementation(deps.libs.composeSettings.diskStorage)
     implementation(deps.libs.composeSettings.memoryStorage)
 
-    implementation(deps.libs.libretrodroid)
+    // Local fork of LibretroDroid with split-viewport (dual-screen) support
+    implementation(project(":libretrodroid"))
 
     // Uncomment this when using a local aar file.
     // implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))

@@ -21,6 +21,7 @@ import com.swordfish.lemuroid.app.shared.GameMenuContract
 import com.swordfish.lemuroid.app.utils.android.settings.LemuroidSettingsList
 import com.swordfish.lemuroid.app.utils.android.settings.LemuroidSettingsMenuLink
 import com.swordfish.lemuroid.app.utils.android.settings.LemuroidSettingsSwitch
+import com.swordfish.lemuroid.lib.library.SystemID
 import kotlin.reflect.KFunction1
 
 @Composable
@@ -140,6 +141,21 @@ fun GameMenuHomeScreen(
                 onResult { putExtra(GameMenuContract.RESULT_EDIT_TOUCH_CONTROLS, true) }
             },
         )
+
+        if (gameMenuRequest.game.systemId == SystemID.NDS.dbname) {
+            LemuroidSettingsMenuLink(
+                title = { Text(text = stringResource(id = R.string.game_menu_edit_screen_layout)) },
+                icon = {
+                    Icon(
+                        painterResource(R.drawable.ic_menu_controls),
+                        contentDescription = stringResource(id = R.string.game_menu_edit_screen_layout),
+                    )
+                },
+                onClick = {
+                    onResult { putExtra(GameMenuContract.RESULT_EDIT_SCREEN_LAYOUT, true) }
+                },
+            )
+        }
 
         LemuroidSettingsSwitch(
             title = { Text(text = stringResource(id = R.string.game_menu_virtual_controls)) },
