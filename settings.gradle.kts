@@ -19,11 +19,14 @@ include(
     ":lemuroid-metadata-libretro-db",
     ":lemuroid-app-ext-free",
     ":lemuroid-app-ext-play",
-    ":bundled-cores"
+    ":bundled-cores",
+    ":libretrodroid"
     // ":baselineprofile"
 )
 
 project(":bundled-cores").projectDir = File("lemuroid-cores/bundled-cores")
+// Local fork of LibretroDroid with split-viewport (dual-screen) support
+project(":libretrodroid").projectDir = File("libretrodroid-local/libretrodroid")
 
 fun usePlayDynamicFeatures(): Boolean {
     val task = gradle.startParameter.taskRequests.toString()

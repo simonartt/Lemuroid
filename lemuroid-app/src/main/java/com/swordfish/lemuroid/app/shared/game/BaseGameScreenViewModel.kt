@@ -13,9 +13,11 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.swordfish.lemuroid.app.mobile.feature.game.GameService
 import com.swordfish.lemuroid.app.mobile.feature.settings.SettingsManager
+import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelInput
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelRetroGameView
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSaves
+import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelScreenLayout
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSideEffects
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTilt
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls
@@ -132,6 +134,12 @@ class BaseGameScreenViewModel(
             sideEffects,
             viewModelScope,
             swapScreensCallback = { swapNdsScreens() },
+        )
+    private val screenLayout =
+        GameViewModelScreenLayout(
+            ScreenLayoutManager(sharedPreferences),
+            system.id == SystemID.NDS,
+            viewModelScope,
         )
     private val saves =
         GameViewModelSaves(
@@ -250,6 +258,39 @@ class BaseGameScreenViewModel(
     fun showGameMenu() {
         touchControls.showGameMenu()
     }
+
+    // NDS screen layout customization (no-op on non-NDS systems)
+    fun isNdsSystem(): Boolean = screenLayout.isNds()
+
+    fun isEditScreenLayoutShown(): Flow<Boolean> = screenLayout.isEditorShown()
+
+    fun toggleEditScreenLayout(show: Boolean) = screenLayout.toggleEditor(show)
+
+    fun getScreenLayoutState(): Flow<ScreenLayoutManager.ScreenLayoutState> = screenLayout.getLayoutState()
+
+    fun currentScreenLayoutState(): ScreenLayoutManager.ScreenLayoutState = screenLayout.currentLayoutState()
+
+    fun updateScreenLayoutTransform(
+        screen: ScreenLayoutManager.ScreenId,
+        offsetX: Float,
+        offsetY: Float,
+        scale: Float,
+    ) = screenLayout.updateTransform(screen, offsetX, offsetY, scale)
+
+    fun saveScreenLayoutAsNewProfile(name: String) = screenLayout.saveAsNewProfile(name)
+
+    fun overwriteActiveScreenLayoutProfile(newName: String? = null) =
+        screenLayout.overwriteActiveProfile(newName)
+
+    fun selectScreenLayoutProfile(id: String) = screenLayout.selectProfile(id)
+
+    fun deleteScreenLayoutProfile(id: String) = screenLayout.deleteProfile(id)
+
+    fun resetScreenLayoutScreen(screen: ScreenLayoutManager.ScreenId) = screenLayout.resetScreen(screen)
+
+    fun resetScreenLayoutToDefault() = screenLayout.resetToDefault()
+
+    fun suggestScreenLayoutProfileName(): String = screenLayout.suggestProfileName()
 
     fun getTouchControllerConfig(): Flow<ControllerConfig> {
         return touchControls.getTouchControllerConfig()

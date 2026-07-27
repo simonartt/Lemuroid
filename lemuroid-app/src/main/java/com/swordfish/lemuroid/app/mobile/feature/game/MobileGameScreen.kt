@@ -3,9 +3,11 @@
 package com.swordfish.lemuroid.app.mobile.feature.game
 
 import android.graphics.RectF
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
@@ -49,8 +52,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
@@ -66,6 +74,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.constraintlayout.compose.ConstraintLayout
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.swordfish.lemuroid.app.shared.game.BaseGameScreenViewModel
+import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls.Companion.MENU_LOADING_ANIMATION_MILLIS
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
@@ -82,6 +91,7 @@ import com.swordfish.touchinput.radial.ui.LemuroidButtonPressFeedback
 import gg.padkit.PadKit
 import gg.padkit.config.HapticFeedbackType
 import gg.padkit.inputstate.InputState
+import timber.log.Timber
 
 @Composable
 fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
@@ -112,6 +122,10 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val tiltSimulatedStates = viewModel.getSimulatedTiltEvents().collectAsState(InputState())
         val tiltSimulatedControls = remember { derivedStateOf { tiltConfiguration.value.controlIds() } }
 
+        // NDS screen layout customization state
+        val screenLayoutState = viewModel.getScreenLayoutState().collectAsState(null)
+        val editScreenLayoutShown = viewModel.isEditScreenLayoutShown().collectAsState(false)
+
         val touchGamePads = currentControllerConfig?.getTouchControllerConfig()
         val leftGamePad = touchGamePads?.leftComposable
         val rightGamePad = touchGamePads?.rightComposable
@@ -128,6 +142,13 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 HapticFeedbackMode.PRESS_RELEASE -> HapticFeedbackType.PRESS_RELEASE
             }
 
+        val screenWidthPx = constraints.maxWidth.toFloat()
+        val screenHeightPx = constraints.maxHeight.toFloat()
+
+        val fullScreenPosition = remember { mutableStateOf<Rect?>(null) }
+        // Keyed by orientation: a rotation invalidates any previously frozen anchor rect
+        val viewportPosition = remember(isLandscape) { mutableStateOf<Rect?>(null) }
+
         PadKit(
             modifier = Modifier.fillMaxSize(),
             onInputEvents = { viewModel.handleVirtualInputEvent(it) },
@@ -137,9 +158,6 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         ) {
             val localContext = LocalContext.current
             val lifecycle = LocalLifecycleOwner.current
-
-            val fullScreenPosition = remember { mutableStateOf<Rect?>(null) }
-            val viewportPosition = remember { mutableStateOf<Rect?>(null) }
 
             AndroidView(
                 modifier =
@@ -153,18 +171,30 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
 
             val fullPos = fullScreenPosition.value
             val viewPos = viewportPosition.value
+            val screenLayout = screenLayoutState.value
 
-            LaunchedEffect(fullPos, viewPos) {
+            LaunchedEffect(fullPos, viewPos, screenLayout, isLandscape) {
                 val gameView = viewModel.retroGameView.retroGameViewFlow()
                 if (fullPos == null || viewPos == null) return@LaunchedEffect
-                val viewport =
-                    RectF(
-                        (viewPos.left - fullPos.left) / fullPos.width,
-                        (viewPos.top - fullPos.top) / fullPos.height,
-                        (viewPos.right - fullPos.left) / fullPos.width,
-                        (viewPos.bottom - fullPos.top) / fullPos.height,
-                    )
-                gameView.viewport = viewport
+                // Custom NDS layout applies in both orientations; at default values the
+                // transform is the identity so unconfigured behavior is unchanged.
+                val applyCustomLayout =
+                    viewModel.isNdsSystem() && screenLayout != null && !screenLayout.isDefault
+                if (applyCustomLayout) {
+                    // Split rendering: top/bottom halves of the frame get independent rects
+                    val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos)
+                    val topRect = applyScreenLayoutTransform(naturalTop, screenLayout!!.topScreen)
+                    val bottomRect = applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen)
+                    val topViewport = normalizeToFullScreen(topRect, fullPos)
+                    val bottomViewport = normalizeToFullScreen(bottomRect, fullPos)
+                    Timber.d("Setting split viewport: top=$topViewport bottom=$bottomViewport")
+                    gameView.splitViewport = topViewport to bottomViewport
+                } else {
+                    val viewport = normalizeToFullScreen(viewPos, fullPos)
+                    Timber.d("Setting game viewport: $viewport (customLayout=false)")
+                    gameView.splitViewport = null
+                    gameView.viewport = viewport
+                }
             }
 
             ConstraintLayout(
@@ -173,8 +203,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                     GameScreenLayout.buildConstraintSet(
                         isLandscape,
                         currentControllerConfig?.allowTouchOverlay ?: true,
-                        verticalAlign = if (!touchControlsVisibleState.value && isLandscape)
-                            GameScreenLayout.VerticalAlign.TOP else GameScreenLayout.VerticalAlign.CENTER,
+                        verticalAlign = GameScreenLayout.VerticalAlign.CENTER,
                     ),
             ) {
                 Box(
@@ -182,7 +211,14 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                         Modifier
                             .layoutId(GameScreenLayout.CONSTRAINTS_GAME_VIEW)
                             .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top))
-                            .onGloballyPositioned { viewportPosition.value = it.boundsInRoot() },
+                            // Freeze the anchor rect while touch controls are hidden: hiding the
+                            // pads removes them from the constraint set which would otherwise move
+                            // the anchor (and thus the picture). Keep the last visible-layout rect.
+                            .onGloballyPositioned {
+                                if (touchControlsVisibleState.value || viewportPosition.value == null) {
+                                    viewportPosition.value = it.boundsInRoot()
+                                }
+                            },
                 )
 
                 val isVisible =
@@ -230,6 +266,20 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         // Draggable floating menu button — shown when virtual controls are hidden
         if (!touchControlsVisibleState.value) {
             DraggableMenuButton(viewModel)
+        }
+
+        // NDS screen layout editor overlay (works with or without touch controls visible).
+        // Composed after DraggableMenuButton so its touches reach the editor first.
+        val layoutState = screenLayoutState.value
+        if (editScreenLayoutShown.value && layoutState != null) {
+            ScreenLayoutEditorOverlay(
+                viewModel = viewModel,
+                layoutState = layoutState,
+                fullPos = fullScreenPosition.value,
+                viewPos = viewportPosition.value,
+                screenWidthPx = screenWidthPx,
+                screenHeightPx = screenHeightPx,
+            )
         }
 
         val isLoading =
@@ -426,20 +476,404 @@ private fun MenuEditTouchControlRow(
     }
 }
 
+/** NDS frame is a vertical stack of two 256x192 screens → 256x384. */
+private const val NDS_FRAME_ASPECT = 256f / 384f
+
+/**
+ * Computes the natural (untouched) rects of the top and bottom screens: the full frame is
+ * aspect-fitted into [anchor], then split in half vertically.
+ */
+private fun computeNaturalScreenRects(anchor: Rect): Pair<Rect, Rect> {
+    val anchorAspect = anchor.width / anchor.height
+    val pictureWidth: Float
+    val pictureHeight: Float
+    if (anchorAspect > NDS_FRAME_ASPECT) {
+        pictureHeight = anchor.height
+        pictureWidth = pictureHeight * NDS_FRAME_ASPECT
+    } else {
+        pictureWidth = anchor.width
+        pictureHeight = pictureWidth / NDS_FRAME_ASPECT
+    }
+    val centerX = (anchor.left + anchor.right) / 2f
+    val centerY = (anchor.top + anchor.bottom) / 2f
+    val pictureLeft = centerX - pictureWidth / 2f
+    val pictureTop = centerY - pictureHeight / 2f
+    val top =
+        Rect(
+            left = pictureLeft,
+            top = pictureTop,
+            right = pictureLeft + pictureWidth,
+            bottom = pictureTop + pictureHeight / 2f,
+        )
+    val bottom =
+        Rect(
+            left = pictureLeft,
+            top = pictureTop + pictureHeight / 2f,
+            right = pictureLeft + pictureWidth,
+            bottom = pictureTop + pictureHeight,
+        )
+    return top to bottom
+}
+
+/** Applies a per-screen transform (scale around own center + pixel translation). */
+private fun applyScreenLayoutTransform(
+    base: Rect,
+    transform: ScreenLayoutManager.ScreenTransform,
+): Rect {
+    val centerX = (base.left + base.right) / 2f
+    val centerY = (base.top + base.bottom) / 2f
+    val halfWidth = (base.right - base.left) * transform.scale / 2f
+    val halfHeight = (base.bottom - base.top) * transform.scale / 2f
+    return Rect(
+        left = centerX - halfWidth + transform.offsetX,
+        top = centerY - halfHeight + transform.offsetY,
+        right = centerX + halfWidth + transform.offsetX,
+        bottom = centerY + halfHeight + transform.offsetY,
+    )
+}
+
+/** Normalizes a root-coordinate rect into the GLRetroView's 0..1 viewport space. */
+private fun normalizeToFullScreen(
+    rect: Rect,
+    fullPos: Rect,
+): RectF {
+    return RectF(
+        (rect.left - fullPos.left) / fullPos.width,
+        (rect.top - fullPos.top) / fullPos.height,
+        (rect.right - fullPos.left) / fullPos.width,
+        (rect.bottom - fullPos.top) / fullPos.height,
+    )
+}
+
+/**
+ * Full-screen editor overlay for the NDS dual-screen layout customizer.
+ * Shows a dashed frame per screen; tap a frame to select it, drag to move, pinch to zoom.
+ * The bottom card mirrors the selection and offers sliders plus profile management.
+ */
+@Composable
+private fun ScreenLayoutEditorOverlay(
+    viewModel: BaseGameScreenViewModel,
+    layoutState: ScreenLayoutManager.ScreenLayoutState,
+    fullPos: Rect?,
+    viewPos: Rect?,
+    screenWidthPx: Float,
+    screenHeightPx: Float,
+) {
+    val selectedScreen = remember { mutableStateOf(ScreenLayoutManager.ScreenId.TOP) }
+
+    if (fullPos != null && viewPos != null) {
+        val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos)
+        val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen)
+        val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen)
+
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(topRect, bottomRect) {
+                        detectTapGestures { tap ->
+                            val topLocal = topRect.translate(-fullPos.left, -fullPos.top)
+                            val bottomLocal = bottomRect.translate(-fullPos.left, -fullPos.top)
+                            selectedScreen.value =
+                                when {
+                                    topLocal.contains(tap) -> ScreenLayoutManager.ScreenId.TOP
+                                    bottomLocal.contains(tap) -> ScreenLayoutManager.ScreenId.BOTTOM
+                                    else -> selectedScreen.value
+                                }
+                        }
+                    }
+                    .pointerInput(layoutState) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            val selected = selectedScreen.value
+                            val current = layoutState.transformOf(selected)
+                            viewModel.updateScreenLayoutTransform(
+                                selected,
+                                current.offsetX + pan.x,
+                                current.offsetY + pan.y,
+                                (current.scale * zoom).coerceIn(
+                                    ScreenLayoutManager.MIN_SCALE,
+                                    ScreenLayoutManager.MAX_SCALE,
+                                ),
+                            )
+                        }
+                    },
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawScreenFrame(
+                    topRect,
+                    fullPos,
+                    selected = selectedScreen.value == ScreenLayoutManager.ScreenId.TOP,
+                )
+                drawScreenFrame(
+                    bottomRect,
+                    fullPos,
+                    selected = selectedScreen.value == ScreenLayoutManager.ScreenId.BOTTOM,
+                )
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        MenuEditScreenLayout(
+            viewModel = viewModel,
+            layoutState = layoutState,
+            selectedScreen = selectedScreen.value,
+            onScreenSelected = { selectedScreen.value = it },
+            screenWidthPx = screenWidthPx,
+            screenHeightPx = screenHeightPx,
+        )
+    }
+}
+
+private fun DrawScope.drawScreenFrame(
+    rect: Rect,
+    fullPos: Rect,
+    selected: Boolean,
+) {
+    drawRect(
+        color = if (selected) Color.White.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.4f),
+        topLeft = Offset(rect.left - fullPos.left, rect.top - fullPos.top),
+        size = Size(rect.width, rect.height),
+        style =
+            Stroke(
+                width = (if (selected) 3.dp else 2.dp).toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 14f)),
+            ),
+    )
+}
+
+@Composable
+private fun MenuEditScreenLayout(
+    viewModel: BaseGameScreenViewModel,
+    layoutState: ScreenLayoutManager.ScreenLayoutState,
+    selectedScreen: ScreenLayoutManager.ScreenId,
+    onScreenSelected: (ScreenLayoutManager.ScreenId) -> Unit,
+    screenWidthPx: Float,
+    screenHeightPx: Float,
+) {
+    val profileExpanded = remember { mutableStateOf(false) }
+    val showSaveDialog = remember { mutableStateOf(false) }
+    val saveDialogName = remember { mutableStateOf("") }
+
+    val activeProfile = layoutState.activeProfileId?.let { layoutState.profiles[it] }
+    val transform = layoutState.transformOf(selectedScreen)
+
+    Card(
+        modifier =
+            Modifier
+                .widthIn(max = 480.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // Screen selector: top / bottom
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val topSelected = selectedScreen == ScreenLayoutManager.ScreenId.TOP
+                if (topSelected) {
+                    androidx.compose.material3.Button(
+                        onClick = { onScreenSelected(ScreenLayoutManager.ScreenId.TOP) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("上屏") }
+                } else {
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { onScreenSelected(ScreenLayoutManager.ScreenId.TOP) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("上屏") }
+                }
+                if (!topSelected) {
+                    androidx.compose.material3.Button(
+                        onClick = { onScreenSelected(ScreenLayoutManager.ScreenId.BOTTOM) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("下屏") }
+                } else {
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { onScreenSelected(ScreenLayoutManager.ScreenId.BOTTOM) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("下屏") }
+                }
+            }
+
+            // Offset X
+            MenuEditTouchControlRow(Icons.Filled.ArrowBack, "水平", 0f) {
+                Slider(
+                    value = transform.offsetX.coerceIn(-screenWidthPx, screenWidthPx),
+                    onValueChange = {
+                        viewModel.updateScreenLayoutTransform(
+                            selectedScreen,
+                            it,
+                            transform.offsetY,
+                            transform.scale,
+                        )
+                    },
+                    valueRange = -screenWidthPx..screenWidthPx,
+                )
+            }
+            // Offset Y
+            MenuEditTouchControlRow(Icons.Default.ArrowDownward, "垂直", 0f) {
+                Slider(
+                    value = transform.offsetY.coerceIn(-screenHeightPx, screenHeightPx),
+                    onValueChange = {
+                        viewModel.updateScreenLayoutTransform(
+                            selectedScreen,
+                            transform.offsetX,
+                            it,
+                            transform.scale,
+                        )
+                    },
+                    valueRange = -screenHeightPx..screenHeightPx,
+                )
+            }
+            // Scale
+            MenuEditTouchControlRow(Icons.Default.OpenInFull, "缩放", 0f) {
+                Slider(
+                    value =
+                        transform.scale.coerceIn(
+                            ScreenLayoutManager.MIN_SCALE,
+                            ScreenLayoutManager.MAX_SCALE,
+                        ),
+                    onValueChange = {
+                        viewModel.updateScreenLayoutTransform(
+                            selectedScreen,
+                            transform.offsetX,
+                            transform.offsetY,
+                            it,
+                        )
+                    },
+                    valueRange = ScreenLayoutManager.MIN_SCALE..ScreenLayoutManager.MAX_SCALE,
+                )
+            }
+
+            // Profile selector
+            androidx.compose.material3.ExposedDropdownMenuBox(
+                expanded = profileExpanded.value,
+                onExpandedChange = { profileExpanded.value = !profileExpanded.value },
+            ) {
+                androidx.compose.material3.TextField(
+                    value = activeProfile?.name ?: "自定义（未保存）",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("布局方案") },
+                    trailingIcon = {
+                        androidx.compose.material3.ExposedDropdownMenuDefaults.TrailingIcon(
+                            expanded = profileExpanded.value,
+                        )
+                    },
+                    modifier =
+                        Modifier
+                            .menuAnchor()
+                            .fillMaxWidth(),
+                )
+                androidx.compose.material3.DropdownMenu(
+                    expanded = profileExpanded.value,
+                    onDismissRequest = { profileExpanded.value = false },
+                ) {
+                    if (layoutState.profiles.isEmpty()) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("暂无已保存方案") },
+                            onClick = { profileExpanded.value = false },
+                        )
+                    }
+                    layoutState.profiles.forEach { (id, profile) ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(profile.name) },
+                            onClick = {
+                                viewModel.selectScreenLayoutProfile(id)
+                                profileExpanded.value = false
+                            },
+                        )
+                    }
+                }
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(
+                    onClick = {
+                        saveDialogName.value = activeProfile?.name ?: viewModel.suggestScreenLayoutProfileName()
+                        showSaveDialog.value = true
+                    },
+                ) { Text("保存方案") }
+                if (layoutState.activeProfileId != null) {
+                    TextButton(
+                        onClick = { viewModel.deleteScreenLayoutProfile(layoutState.activeProfileId!!) },
+                    ) { Text("删除方案") }
+                }
+                TextButton(onClick = { viewModel.resetScreenLayoutScreen(selectedScreen) }) { Text("重置本屏") }
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { viewModel.resetScreenLayoutToDefault() }) { Text("全部重置") }
+                TextButton(onClick = { viewModel.toggleEditScreenLayout(false) }) { Text("完成") }
+            }
+        }
+    }
+
+    if (showSaveDialog.value) {
+        Dialog(onDismissRequest = { showSaveDialog.value = false }) {
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("保存布局方案")
+                    androidx.compose.material3.TextField(
+                        value = saveDialogName.value,
+                        onValueChange = { saveDialogName.value = it },
+                        label = { Text("方案名称") },
+                        singleLine = true,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { showSaveDialog.value = false }) { Text("取消") }
+                        if (layoutState.activeProfileId != null) {
+                            TextButton(
+                                onClick = {
+                                    val trimmedName = saveDialogName.value.trim()
+                                    viewModel.overwriteActiveScreenLayoutProfile(
+                                        if (trimmedName.isEmpty()) null else trimmedName,
+                                    )
+                                    showSaveDialog.value = false
+                                },
+                            ) { Text("覆盖当前") }
+                        }
+                        TextButton(
+                            onClick = {
+                                val name =
+                                    saveDialogName.value.ifBlank {
+                                        viewModel.suggestScreenLayoutProfileName()
+                                    }
+                                viewModel.saveScreenLayoutAsNewProfile(name)
+                                showSaveDialog.value = false
+                            },
+                        ) { Text("存为新方案") }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /**
  * Floating menu button shown when virtual controls are hidden.
  * Simple fixed position at top-right, tap to open game menu.
+ * NOTE: the previous full-screen invisible click layer was removed — it swallowed every
+ * touch and killed the NDS touchscreen input when virtual controls were hidden.
  */
 @Composable
 private fun DraggableMenuButton(viewModel: BaseGameScreenViewModel) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clickable(
-                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                indication = null,
-            ) {},
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         androidx.compose.foundation.layout.Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)

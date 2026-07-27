@@ -104,7 +104,9 @@ android {
         getByName("debug") {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-DEBUG"
-            resValue("string", "lemuroid_name", "LemuroiDebug")
+            resValue("string", "lemuroid_name", "Lemuroid V8A")
+            manifestPlaceholders["appIcon"] = "@mipmap/lemuroid_launcher"
+            manifestPlaceholders["appIconRound"] = "@mipmap/lemuroid_launcher_round"
         }
     }
 
@@ -204,7 +206,8 @@ dependencies {
     implementation(deps.libs.composeSettings.diskStorage)
     implementation(deps.libs.composeSettings.memoryStorage)
 
-    implementation(deps.libs.libretrodroid)
+    // Local fork of LibretroDroid with split-viewport (dual-screen) support
+    implementation(project(":libretrodroid"))
 
     // Uncomment this when using a local aar file.
     // implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))

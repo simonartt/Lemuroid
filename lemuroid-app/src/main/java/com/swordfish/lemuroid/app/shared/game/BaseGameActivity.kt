@@ -413,6 +413,9 @@ abstract class BaseGameActivity : ImmersiveActivity() {
             if (data?.getBooleanExtra(GameMenuContract.RESULT_EDIT_TOUCH_CONTROLS, false) == true) {
                 baseGameScreenViewModel.toggleEditControls(true)
             }
+            if (data?.getBooleanExtra(GameMenuContract.RESULT_EDIT_SCREEN_LAYOUT, false) == true) {
+                baseGameScreenViewModel.toggleEditScreenLayout(true)
+            }
             if (data?.hasExtra(GameMenuContract.RESULT_TOGGLE_TOUCH_CONTROLS) == true) {
                 val enabled = data.getBooleanExtra(GameMenuContract.RESULT_TOGGLE_TOUCH_CONTROLS, true)
                 baseGameScreenViewModel.setTouchControllerVisible(enabled)
