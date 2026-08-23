@@ -5,4 +5,4 @@
 [submodule "libretrodroid-local"]
 	path = libretrodroid-local
 	url = https://github.com/simonartt/LibretroDroid.git
-	branch = main
+	branch = dualscreen
