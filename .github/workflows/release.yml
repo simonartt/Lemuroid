@@ -36,8 +36,8 @@ jobs:
         id: ver
         run: |
           set -e
-          VER=$(grep -m1 'versionName = "' lemuroid-app/build.gradle.kts | sed 's/versionName = "\(.*\)"/\1/')
-          SUF=$(grep -m1 'versionNameSuffix = "' lemuroid-app/build.gradle.kts | sed 's/versionNameSuffix = "\(.*\)"/\1/')
+          VER=$(grep -m1 'versionName = "' lemuroid-app/build.gradle.kts | sed 's/.*versionName = "\([^"]*\)".*/\1/')
+          SUF=$(grep -m1 'versionNameSuffix = "' lemuroid-app/build.gradle.kts | sed 's/.*versionNameSuffix = "\([^"]*\)".*/\1/')
           APK=lemuroid-app/build/outputs/apk/freeDynamic/release/lemuroid-app-free-dynamic-release.apk
           ls -la "$APK"
           mkdir -p dist
