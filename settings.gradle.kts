@@ -2,9 +2,14 @@
 
 pluginManagement {
     repositories {
-        maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
-        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+        // Aliyun mirrors are only useful for builds inside China; they are
+        // unreliable from GitHub Actions runners (US) and a 5xx there aborts
+        // the whole artifact resolution. Skip them on CI.
+        if (System.getenv("GITHUB_ACTIONS") != "true") {
+            maven { url = uri("https://maven.aliyun.com/repository/google") }
+            maven { url = uri("https://maven.aliyun.com/repository/public") }
+            maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+        }
         google()
         mavenCentral()
         gradlePluginPortal()

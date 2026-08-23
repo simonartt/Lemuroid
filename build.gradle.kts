@@ -27,8 +27,12 @@ plugins {
 allprojects {
     repositories {
         mavenLocal()
-        maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        // Aliyun mirrors are unreliable from GitHub Actions runners (US); a 5xx
+        // there aborts artifact resolution. Skip them on CI.
+        if (System.getenv("GITHUB_ACTIONS") != "true") {
+            maven { url = uri("https://maven.aliyun.com/repository/google") }
+            maven { url = uri("https://maven.aliyun.com/repository/public") }
+        }
         google()
         mavenCentral()
         maven { setUrl("https://jitpack.io") }
