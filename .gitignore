@@ -16,4 +16,3 @@ project.properties
 .gradle
 .externalNativeBuild
 local.properties
-release.jks

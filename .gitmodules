@@ -2,3 +2,7 @@
 	path = lemuroid-cores
 	url = https://github.com/Swordfish90/LemuroidCores
 	branch = master
+[submodule "libretrodroid-local"]
+	path = libretrodroid-local
+	url = https://github.com/simonartt/LibretroDroid.git
+	branch = main
