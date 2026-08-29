@@ -53,6 +53,19 @@ fun GameMenuHomeScreen(
                 },
                 onClick = { navController.navigateToRoute(GameMenuRoute.LOAD) },
             )
+
+            LemuroidSettingsMenuLink(
+                title = { Text(text = stringResource(id = R.string.game_menu_load_local_save)) },
+                icon = {
+                    Icon(
+                        painterResource(R.drawable.ic_menu_load),
+                        contentDescription = stringResource(id = R.string.game_menu_load_local_save),
+                    )
+                },
+                onClick = {
+                    onResult { putExtra(GameMenuContract.RESULT_LOAD_LOCAL_SAVE, true) }
+                },
+            )
         }
 
         LemuroidSettingsMenuLink(

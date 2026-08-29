@@ -131,6 +131,7 @@
 
     <string name="game_menu_save">Save</string>
     <string name="game_menu_load">Load</string>
+    <string name="game_menu_load_local_save">Load Local Save</string>
     <string name="game_menu_restart">Restart</string>
     <string name="game_menu_quit">Quit</string>
     <string name="game_menu_settings">Settings</string>
@@ -148,6 +149,8 @@
 
     <string name="game_toast_settings_button_using_gamepad">Gamepad detected. Access settings menu with %1$s.</string>
     <string name="game_toast_load_state_failed">Cannot load this state</string>
+    <string name="game_toast_load_local_save_success">Local save loaded</string>
+    <string name="game_toast_load_local_save_failed">Cannot load local save</string>
     <string name="game_toast_quick_save_loaded">Quick loaded</string>
     <string name="game_toast_quick_save_saved">Quick saved</string>
 

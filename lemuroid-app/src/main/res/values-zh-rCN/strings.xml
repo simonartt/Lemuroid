@@ -94,6 +94,7 @@
     <string name="home_notification_desmume_deprecated_action">切换到熔化</string>
     <string name="game_menu_save">保存</string>
     <string name="game_menu_load">载入</string>
+    <string name="game_menu_load_local_save">载入本地存档</string>
     <string name="game_menu_restart">重新开始</string>
     <string name="game_menu_quit">退出</string>
     <string name="game_menu_settings">设置</string>
@@ -107,6 +108,8 @@
     <string name="game_loading_preparing_game">正在准备游戏…</string>
     <string name="game_toast_settings_button_using_gamepad">检测到游戏手柄。使用 %1$s 访问设置菜单。</string>
     <string name="game_toast_load_state_failed">无法加载此状态</string>
+    <string name="game_toast_load_local_save_success">本地存档已载入</string>
+    <string name="game_toast_load_local_save_failed">无法载入本地存档</string>
     <string name="game_toast_quick_save_loaded">快速加载</string>
     <string name="game_toast_quick_save_saved">快速保存</string>
     <string name="empty_view_default">没有项目</string>

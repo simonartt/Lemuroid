@@ -68,6 +68,9 @@ suspend fun setSaveRAM(
         }
     }
 
+    /** Returns the directory where RAM saves (.sav / .srm) are stored. */
+    fun getSaveRAMDirectory(): File = directoriesManager.getSavesDirectory()
+
     private suspend fun getSaveFile(fileName: String): File {
         return withContext(Dispatchers.IO) {
             val savesDirectory = directoriesManager.getSavesDirectory()

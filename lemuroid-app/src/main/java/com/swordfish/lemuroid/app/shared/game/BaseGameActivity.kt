@@ -3,6 +3,7 @@ package com.swordfish.lemuroid.app.shared.game
 import android.app.Activity
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -41,10 +42,13 @@ import com.swordfish.lemuroid.lib.saves.StatesManager
 import com.swordfish.lemuroid.lib.saves.StatesPreviewManager
 import com.swordfish.touchinput.radial.sensors.TiltConfiguration
 import dagger.Lazy
+import java.io.File
 import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -384,6 +388,9 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                     baseGameScreenViewModel.loadSlot(data.getIntExtra(GameMenuContract.RESULT_LOAD, 0))
                 }
             }
+            if (data?.getBooleanExtra(GameMenuContract.RESULT_LOAD_LOCAL_SAVE, false) == true) {
+                launchLocalSavePicker()
+            }
             if (data?.getBooleanExtra(GameMenuContract.RESULT_QUIT, false) == true) {
                 baseGameScreenViewModel.requestFinish()
             }
@@ -424,11 +431,86 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                 val tiltConfig = data.serializable<TiltConfiguration>(GameMenuContract.RESULT_CHANGE_TILT_CONFIG)
                 baseGameScreenViewModel.changeTiltConfiguration(tiltConfig!!)
             }
+        } else if (requestCode == REQUEST_CODE_PICK_LOCAL_SAVE && resultCode == Activity.RESULT_OK) {
+            val uri = data?.data
+            if (uri == null) {
+                displayToast(R.string.game_toast_load_local_save_failed)
+                return
+            }
+            GlobalScope.launch(Dispatchers.Main) {
+                loadLocalSave(uri)
+            }
         }
+    }
+
+    private fun launchLocalSavePicker() {
+        val intent =
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/octet-stream", "*/*"))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+            }
+        try {
+            startActivityForResult(intent, REQUEST_CODE_PICK_LOCAL_SAVE)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to launch local save picker")
+            displayToast(R.string.game_toast_load_local_save_failed)
+        }
+    }
+
+    private suspend fun loadLocalSave(uri: Uri) {
+        try {
+            val result =
+                withContext(Dispatchers.IO) {
+                    val data =
+                        contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                            ?: return@withContext LocalSaveLoadResult.Failure
+
+                    if (data.isEmpty()) {
+                        return@withContext LocalSaveLoadResult.Failure
+                    }
+
+                    // Oversized saves (e.g. from DraStic or padded dumps) are trimmed to 512KB for NDS compatibility.
+                    val trimmedData = if (data.size > 1024 * 1024) data.copyOf(512 * 1024) else data
+
+                    val baseName = game.fileName.substringBeforeLast(".")
+                    val saveDirectory = savesManager.getSaveRAMDirectory()
+                    // Write both .sav and .srm so the save is picked up on next launch regardless of system.
+                    File(saveDirectory, "$baseName.sav").writeBytes(trimmedData)
+                    File(saveDirectory, "$baseName.srm").writeBytes(trimmedData)
+
+                    Timber.i("Loaded local save: %s (%d bytes)", "$baseName.sav", trimmedData.size)
+                    LocalSaveLoadResult.Success(trimmedData)
+                }
+
+            if (result is LocalSaveLoadResult.Success) {
+                val injected =
+                    baseGameScreenViewModel.retroGameView.retroGameView?.unserializeSRAM(result.data) == true
+                if (injected) {
+                    displayToast(getString(R.string.game_toast_load_local_save_success))
+                } else {
+                    displayToast(R.string.game_toast_load_local_save_failed)
+                }
+            } else {
+                displayToast(R.string.game_toast_load_local_save_failed)
+            }
+        } catch (e: Throwable) {
+            Timber.e(e, "Failed to load local save")
+            displayToast(R.string.game_toast_load_local_save_failed)
+        }
+    }
+
+    private sealed interface LocalSaveLoadResult {
+        data class Success(val data: ByteArray) : LocalSaveLoadResult
+
+        data object Failure : LocalSaveLoadResult
     }
 
     companion object {
         const val DIALOG_REQUEST = 100
+        private const val REQUEST_CODE_PICK_LOCAL_SAVE = 101
 
         private const val EXTRA_GAME = "GAME"
         private const val EXTRA_LOAD_SAVE = "LOAD_SAVE"
