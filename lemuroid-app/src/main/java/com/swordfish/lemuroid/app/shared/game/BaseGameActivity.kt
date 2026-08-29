@@ -487,13 +487,19 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                 }
 
             if (result is LocalSaveLoadResult.Success) {
+                // Inject the save RAM into the running core when supported (e.g. melonDS exposes it
+                // through retro_get_memory). Cores that manage their own save file won't accept it,
+                // in which case the already-written .sav file is picked up on the next game launch.
                 val injected =
                     baseGameScreenViewModel.retroGameView.retroGameView?.unserializeSRAM(result.data) == true
-                if (injected) {
-                    displayToast(getString(R.string.game_toast_load_local_save_success))
-                } else {
-                    displayToast(R.string.game_toast_load_local_save_failed)
-                }
+                Timber.i("Local save injection result: $injected")
+
+                // Soft-reset the core so the game restarts from boot and reads the new save,
+                // mirroring how saves are loaded on game start. Games cache the save in their own
+                // memory and won't pick it up without a reset.
+                baseGameScreenViewModel.reset()
+
+                displayToast(getString(R.string.game_toast_load_local_save_success))
             } else {
                 displayToast(R.string.game_toast_load_local_save_failed)
             }

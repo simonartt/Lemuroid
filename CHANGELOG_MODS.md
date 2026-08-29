@@ -16,7 +16,7 @@
 2. `GameMenuHomeScreen.kt` — 在「载入」菜单项下方新增「载入本地存档」入口（仅 `statesSupported` 核心显示，跟随现有载入菜单位置）
 3. `BaseGameActivity.kt`:
    - 菜单回传收到 `RESULT_LOAD_LOCAL_SAVE` 后，用 `ACTION_OPEN_DOCUMENT` 打开系统文件选择器（新 requestCode 101，与 DIALOG_REQUEST 区分）
-   - 选择器返回 `.sav` Uri → IO 线程读字节 → 超大存档（>1MB，烧录卡填充）自动裁剪至 512KB → 同时写入存档目录的 `游戏名.sav` 与 `.srm`（保证下次启动无论核心优先级都能读到）→ 调用 `GLRetroView.unserializeSRAM()` 注入核心，**即时生效无需重启**
+   - 选择器返回 `.sav` Uri → IO 线程读字节 → 超大存档（>1MB，烧录卡填充）自动裁剪至 512KB → 同时写入存档目录的 `游戏名.sav` 与 `.srm`（保证下次启动无论核心优先级都能读到）→ 调用 `GLRetroView.unserializeSRAM()` 注入核心 → **软重置核心（retro_reset）让游戏重新从新存档引导**
    - 成功/失败均以 Toast 提示（新增 `game_toast_load_local_save_success/failed`）
 4. `SavesManager.kt` — 新增 `getSaveRAMDirectory()` 公开方法
 5. `strings.xml` + `values-zh-rCN/strings.xml` — 新增菜单与提示字符串
