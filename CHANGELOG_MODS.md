@@ -16,12 +16,14 @@
 2. `GameMenuHomeScreen.kt` — 在「载入」菜单项下方新增「载入本地存档」入口（仅 `statesSupported` 核心显示，跟随现有载入菜单位置）
 3. `BaseGameActivity.kt`:
    - 菜单回传收到 `RESULT_LOAD_LOCAL_SAVE` 后，用 `ACTION_OPEN_DOCUMENT` 打开系统文件选择器（新 requestCode 101，与 DIALOG_REQUEST 区分）
-   - 选择器返回 `.sav` Uri → IO 线程读字节 → 超大存档（>1MB，烧录卡填充）自动裁剪至 512KB → 同时写入存档目录的 `游戏名.sav` 与 `.srm`（保证下次启动无论核心优先级都能读到）→ 调用 `GLRetroView.unserializeSRAM()` 注入核心 → **软重置核心（retro_reset）让游戏重新从新存档引导**
+   - 选择器返回 `.sav` Uri → IO 线程读字节 → 超大存档（>1MB，烧录卡填充）自动裁剪至 512KB → 同时写入存档目录的 `游戏名.sav` 与 `.srm`（保证下次启动无论核心优先级都能读到）
+   - **立即应用（关键）**：写盘后重启游戏会话（`restartGameToApplySave()`）—— 新 Activity 会创建全新核心，`retro_load_game` 时 melonDS 从磁盘重读 `*.srm`，从而带上刚导入的存档。当前 Activity 直接 `finish()`（不写回旧 SRAM，避免覆盖新存档）
    - 成功/失败均以 Toast 提示（新增 `game_toast_load_local_save_success/failed`）
 4. `SavesManager.kt` — 新增 `getSaveRAMDirectory()` 公开方法
 5. `strings.xml` + `values-zh-rCN/strings.xml` — 新增菜单与提示字符串
 
-**说明**: 载入的是 SRAM 存档（.sav），与「保存/载入」菜单项（状态槽位快照）不同。已载入的存档会写回存档目录，重启游戏后由 `getSaveRAM()` 自动读取。TV 版菜单（`TVGameMenuActivity`）未同步此入口。
+**说明**: 载入的是 SRAM 存档（.sav），与「保存/载入」菜单项（状态槽位快照）不同。已载入的存档会写回存档目录。
+**重要实测结论**: melonDS（NDS）只在**全新启动（`retro_load_game`）时从磁盘重读 `*.srm`**。`GLRetroView.unserializeSRAM()` 内存注入与 `retro_reset` 软重置均不能让它重读档——实测需"杀后台 → 替换 *.srm → 重开"才能生效。因此改为「写盘 + 重启游戏会话」，等效于自动完成上述手动操作。若核心支持内存注入（部分非 NDS 核心），重启同样安全（新核心也会读新档）。TV 版菜单（`TVGameMenuActivity`）未同步此入口。
 
 ---
 

@@ -487,19 +487,16 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                 }
 
             if (result is LocalSaveLoadResult.Success) {
-                // Inject the save RAM into the running core when supported (e.g. melonDS exposes it
-                // through retro_get_memory). Cores that manage their own save file won't accept it,
-                // in which case the already-written .sav file is picked up on the next game launch.
-                val injected =
-                    baseGameScreenViewModel.retroGameView.retroGameView?.unserializeSRAM(result.data) == true
-                Timber.i("Local save injection result: $injected")
-
-                // Soft-reset the core so the game restarts from boot and reads the new save,
-                // mirroring how saves are loaded on game start. Games cache the save in their own
-                // memory and won't pick it up without a reset.
-                baseGameScreenViewModel.reset()
-
                 displayToast(getString(R.string.game_toast_load_local_save_success))
+
+                // melonDS (NDS) and several other cores only re-read the cartridge battery save
+                // (*.srm) from disk at a fresh boot (retro_load_game). Neither SRAM memory
+                // injection (retro_get_memory) nor a soft reset (retro_reset) makes the core reload
+                // that file, so the only reliable way to apply the just-imported save is to restart
+                // the game session: the relaunched activity builds a brand new core which reads the
+                // freshly written *.srm. The current activity is finished WITHOUT writing its
+                // in-memory (old) SRAM, otherwise it would overwrite the imported save first.
+                restartGameToApplySave()
             } else {
                 displayToast(R.string.game_toast_load_local_save_failed)
             }
@@ -507,6 +504,25 @@ abstract class BaseGameActivity : ImmersiveActivity() {
             Timber.e(e, "Failed to load local save")
             displayToast(R.string.game_toast_load_local_save_failed)
         }
+    }
+
+    // Relaunches the game with a brand new core so a freshly imported local save (*.srm) is read
+    // from disk. The current activity is finished normally (which skips the background save because
+    // the activity is finishing), so the in-memory (old) SRAM is NOT written back over our new save.
+    private fun restartGameToApplySave() {
+        val leanback = intent.getBooleanExtra(EXTRA_LEANBACK, false)
+        val gameActivity = if (leanback) TVGameActivity::class.java else GameActivity::class.java
+
+        startActivity(
+            Intent(this, gameActivity).apply {
+                putExtra(EXTRA_GAME, game)
+                putExtra(EXTRA_LOAD_SAVE, false)
+                putExtra(EXTRA_LEANBACK, leanback)
+                putExtra(EXTRA_SYSTEM_CORE_CONFIG, systemCoreConfig)
+            },
+        )
+        finish()
+        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
 
     private sealed interface LocalSaveLoadResult {
