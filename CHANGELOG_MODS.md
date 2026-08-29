@@ -16,7 +16,7 @@
 2. `GameMenuHomeScreen.kt` — 在「载入」菜单项下方新增「载入本地存档」入口（仅 `statesSupported` 核心显示，跟随现有载入菜单位置）
 3. `BaseGameActivity.kt`:
    - 菜单回传收到 `RESULT_LOAD_LOCAL_SAVE` 后，用 `ACTION_OPEN_DOCUMENT` 打开系统文件选择器（新 requestCode 101，与 DIALOG_REQUEST 区分）
-   - 选择器返回 `.sav` Uri → IO 线程读字节 → 超大存档（>1MB，烧录卡填充）自动裁剪至 512KB → 同时写入存档目录的 `游戏名.sav` 与 `.srm`（保证下次启动无论核心优先级都能读到）
+   - 选择器返回 `.sav` Uri → IO 线程读字节 → 超大存档（>1MB，烧录卡填充）自动裁剪至 512KB → **按 NDS 游戏文件名（`game.fileName`）写入存档目录的 `游戏名.srm`**（melonDS 自读的正是这个；上传的 `.sav` 自身文件名与该文件名不一致也没关系，写入始终对齐 ROM 名；不再额外写 `.sav`，避免残留误导文件）
    - **立即应用（关键）**：写盘后重启游戏会话（`restartGameToApplySave()`）—— 新 Activity 会创建全新核心，`retro_load_game` 时 melonDS 从磁盘重读 `*.srm`，从而带上刚导入的存档。当前 Activity 直接 `finish()`（不写回旧 SRAM，避免覆盖新存档）
    - 成功/失败均以 Toast 提示（新增 `game_toast_load_local_save_success/failed`）
 4. `SavesManager.kt` — 新增 `getSaveRAMDirectory()` 公开方法

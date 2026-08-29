@@ -476,13 +476,18 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                     // Oversized saves (e.g. from DraStic or padded dumps) are trimmed to 512KB for NDS compatibility.
                     val trimmedData = if (data.size > 1024 * 1024) data.copyOf(512 * 1024) else data
 
+                    // The written save is always named after the NDS ROM file (game.fileName),
+                    // never after the uploaded .sav's own name. melonDS derives its cartridge
+                    // save name from the ROM basename, so this guarantees a match even when the
+                    // uploaded file is called something else.
                     val baseName = game.fileName.substringBeforeLast(".")
                     val saveDirectory = savesManager.getSaveRAMDirectory()
-                    // Write both .sav and .srm so the save is picked up on next launch regardless of system.
-                    File(saveDirectory, "$baseName.sav").writeBytes(trimmedData)
+                    // melonDS reads "ROMbase.srm" from the Save directory, so we write the
+                    // imported content as .srm (the old generic .sav write is dropped: melonDS
+                    // ignores it and it could leave a stale file behind).
                     File(saveDirectory, "$baseName.srm").writeBytes(trimmedData)
 
-                    Timber.i("Loaded local save: %s (%d bytes)", "$baseName.sav", trimmedData.size)
+                    Timber.i("Loaded local save into %s (%d bytes)", "$baseName.srm", trimmedData.size)
                     LocalSaveLoadResult.Success(trimmedData)
                 }
 
