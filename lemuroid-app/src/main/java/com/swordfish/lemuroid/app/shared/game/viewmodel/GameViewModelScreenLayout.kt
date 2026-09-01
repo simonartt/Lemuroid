@@ -47,6 +47,11 @@ class GameViewModelScreenLayout(
         scope.launch { screenLayoutManager.adjustTransform(screen, deltaOffsetX = dx, deltaOffsetY = dy) }
     }
 
+    /** Sets the horizontal (width-axis) scale; 0.5 = half width, 1.0 = full. */
+    fun setHorizontalScale(screen: ScreenId, scaleX: Float) {
+        scope.launch { screenLayoutManager.setHorizontalScale(screen, scaleX) }
+    }
+
     /** Sets the vertical (height-axis) scale; 0.5 = half height, 1.0 = full. */
     fun setVerticalScale(screen: ScreenId, scaleY: Float) {
         scope.launch { screenLayoutManager.setVerticalScale(screen, scaleY) }

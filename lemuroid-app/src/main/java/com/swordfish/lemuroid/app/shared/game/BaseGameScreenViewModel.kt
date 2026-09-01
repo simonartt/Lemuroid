@@ -264,7 +264,15 @@ class BaseGameScreenViewModel(
 
     fun isEditScreenLayoutShown(): Flow<Boolean> = screenLayout.isEditorShown()
 
-    fun toggleEditScreenLayout(show: Boolean) = screenLayout.toggleEditor(show)
+    fun toggleEditScreenLayout(show: Boolean) {
+        screenLayout.toggleEditor(show)
+        // Freeze the game while the layout editor is open; resume when it closes.
+        if (show) {
+            retroGameView.retroGameView?.pauseEmulation()
+        } else {
+            retroGameView.retroGameView?.resumeEmulation()
+        }
+    }
 
     fun getScreenLayoutState(): Flow<ScreenLayoutManager.ScreenLayoutState> = screenLayout.getLayoutState()
 
@@ -280,6 +288,10 @@ class BaseGameScreenViewModel(
     /** Nudges the selected screen by a pixel delta (arrow tools). */
     fun nudgeScreenLayout(screen: ScreenLayoutManager.ScreenId, dx: Float, dy: Float) =
         screenLayout.nudge(screen, dx, dy)
+
+    /** Sets the horizontal (width-axis) scale of the selected screen. */
+    fun setScreenLayoutHorizontalScale(screen: ScreenLayoutManager.ScreenId, scaleX: Float) =
+        screenLayout.setHorizontalScale(screen, scaleX)
 
     /** Sets the vertical (height-axis) scale of the selected screen. */
     fun setScreenLayoutVerticalScale(screen: ScreenLayoutManager.ScreenId, scaleY: Float) =

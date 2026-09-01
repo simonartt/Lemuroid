@@ -131,9 +131,10 @@ private fun ToolGridButton(
                 Text(
                     text = spec.label,
                     color = Color(0xFF202020),
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
+                    lineHeight = 13.sp,
                 )
             }
         }
@@ -147,24 +148,42 @@ private class ToolCell(
     val action: (BaseGameScreenViewModel, ScreenId, (ScreenId) -> Unit) -> Unit,
 )
 
+/**
+ * Tool grid button semantics — faithful to docs/UI-元素文档.md §4.1:
+ *
+ * | cell | function                                        | data field  |
+ * |------|-------------------------------------------------|-------------|
+ * | R1C1 | height → 50% of default                        | scaleY = 0.5 |
+ * | R1C2 | move up                                         | offsetY -= n |
+ * | R1C3 | width → 50% of default                         | scaleX = 0.5 |
+ * | R1C4 | height → 100% of default                       | scaleY = 1.0 |
+ * | R2C1 | move left                                       | offsetX -= n |
+ * | R2C2 | free move (four-way, no-op placeholder)         | —            |
+ * | R2C3 | move right                                      | offsetX += n |
+ * | R2C4 | width → 100% of default                        | scaleX = 1.0 |
+ * | R3C1 | original size (reset this screen)               | reset        |
+ * | R3C2 | move down                                       | offsetY += n |
+ * | R3C3 | screen gap (push the two screens apart)         | gap += delta |
+ * | R3C4 | empty                                           | —            |
+ */
 private val TOOL_GRID: Array<Array<ToolCell?>> = arrayOf(
-    // Row 1: 纵向缩放50% / 上移 / 水平间距 / 纵向缩放100%
+    // Row 1: 高度50% / 上移 / 宽度50% / 高度100%
     arrayOf(
-        ToolCell("50%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_HALF) },
+        ToolCell("高 50%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_HALF) },
         ToolCell("上移", Icons.Filled.ArrowUpward) { vm, s, _ -> vm.nudgeScreenLayout(s, 0f, -ScreenLayoutManager.NUDGE_DELTA) },
-        ToolCell("间距") { vm, s, _ -> vm.setScreenLayoutGap(s, vm.currentScreenLayoutState().transformOf(s).gap + ScreenLayoutManager.GAP_DELTA) },
-        ToolCell("100%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_FULL) },
+        ToolCell("宽 50%") { vm, s, _ -> vm.setScreenLayoutHorizontalScale(s, ScreenLayoutManager.HORIZONTAL_SCALE_HALF) },
+        ToolCell("高 100%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_FULL) },
     ),
-    // Row 2: 左移 / 自由移动 / 右移 / 间距100%
+    // Row 2: 左移 / 自由移动 / 右移 / 宽度100%
     arrayOf(
         ToolCell("左移", Icons.Filled.ArrowBack) { vm, s, _ -> vm.nudgeScreenLayout(s, -ScreenLayoutManager.NUDGE_DELTA, 0f) },
         ToolCell("自由", Icons.Filled.OpenInFull) { vm, s, _ -> vm.nudgeScreenLayout(s, 0f, 0f) },
         ToolCell("右移", Icons.Filled.ArrowForward) { vm, s, _ -> vm.nudgeScreenLayout(s, ScreenLayoutManager.NUDGE_DELTA, 0f) },
-        ToolCell("间距") { vm, s, _ -> vm.setScreenLayoutGap(s, 0f) },
+        ToolCell("宽 100%") { vm, s, _ -> vm.setScreenLayoutHorizontalScale(s, ScreenLayoutManager.HORIZONTAL_SCALE_FULL) },
     ),
-    // Row 3: Original Size / 下移 / Screen Gap / 空位
+    // Row 3: 原始尺寸 / 下移 / 屏幕间距 / 空位
     arrayOf(
-        ToolCell("原始") { vm, s, _ -> vm.resetScreenLayoutScreen(s) },
+        ToolCell("还原") { vm, s, _ -> vm.resetScreenLayoutScreen(s) },
         ToolCell("下移", Icons.Filled.ArrowDownward) { vm, s, _ -> vm.nudgeScreenLayout(s, 0f, ScreenLayoutManager.NUDGE_DELTA) },
         ToolCell("间距") { vm, s, _ -> vm.setScreenLayoutGap(s, vm.currentScreenLayoutState().transformOf(s).gap + ScreenLayoutManager.GAP_DELTA) },
         null, // R3C4 empty slot

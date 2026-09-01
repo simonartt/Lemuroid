@@ -522,7 +522,8 @@ private fun applyScreenLayoutTransform(
 ): Rect {
     val centerX = (base.left + base.right) / 2f
     val centerY = (base.top + base.bottom) / 2f
-    val halfWidth = (base.right - base.left) * transform.scale / 2f
+    // Effective width = uniform scale × horizontal (width-axis) scale.
+    val halfWidth = (base.right - base.left) * transform.scale * transform.scaleX / 2f
     // Effective height = uniform scale × vertical (height-axis) scale.
     val halfHeight = (base.bottom - base.top) * transform.scale * transform.scaleY / 2f
     // gap pushes the screen along the vertical stack axis: top screen gapSign=-1 (up),

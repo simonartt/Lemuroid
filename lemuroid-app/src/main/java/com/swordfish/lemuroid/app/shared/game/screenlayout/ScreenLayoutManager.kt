@@ -27,16 +27,20 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
     data class ScreenTransform(
         val offsetX: Float = 0f,
         val offsetY: Float = 0f,
+        // Uniform (equal-proportion) scale, driven by the zoom panel (1x..7x). 1.0 = original.
         val scale: Float = 1.0f,
-        // v2: vertical (height-axis) scale, independent of [scale]. 1.0 = original height.
-        // Used by "纵向缩放 50%/100%" tools; combined with [scale] => effectiveHeight = base * scale * scaleY.
+        // Horizontal (width-axis) scale, independent of [scale]. 1.0 = original width.
+        // Driven by "宽度 50%/100%" tools (R1C3 / R2C4). effectiveWidth = base * scale * scaleX.
+        val scaleX: Float = 1.0f,
+        // Vertical (height-axis) scale, independent of [scale]. 1.0 = original height.
+        // Driven by "高度 50%/100%" tools (R1C1 / R1C4). effectiveHeight = base * scale * scaleY.
         val scaleY: Float = 1.0f,
-        // v2: gap to the paired screen (pixels). Positive = move away, negative = overlap.
+        // Gap to the paired screen (pixels). Positive = move away, negative = overlap.
         // In the vertical-stack (portrait) layout this is the vertical spacing between the two screens.
         val gap: Float = 0f,
     ) {
         val isDefault: Boolean
-            get() = offsetX == 0f && offsetY == 0f && scale == 1.0f && scaleY == 1.0f && gap == 0f
+            get() = offsetX == 0f && offsetY == 0f && scale == 1.0f && scaleX == 1.0f && scaleY == 1.0f && gap == 0f
 
         companion object {
             val DEFAULT = ScreenTransform()
@@ -95,6 +99,7 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         deltaOffsetX: Float = 0f,
         deltaOffsetY: Float = 0f,
         deltaScale: Float = 1f,
+        deltaScaleX: Float = 1f,
         deltaScaleY: Float = 1f,
         deltaGap: Float = 0f,
     ) {
@@ -107,11 +112,19 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
                     offsetX = old.offsetX + deltaOffsetX,
                     offsetY = old.offsetY + deltaOffsetY,
                     scale = old.scale * deltaScale,
+                    scaleX = old.scaleX * deltaScaleX,
                     scaleY = old.scaleY * deltaScaleY,
                     gap = old.gap + deltaGap,
                 ),
             ),
         )
+    }
+
+    /** Sets the horizontal (width-axis) scale of one screen; 0.5 = half width, 1.0 = full. */
+    suspend fun setHorizontalScale(screen: ScreenId, scaleX: Float) {
+        val current = stateFlow.value
+        val old = current.transformOf(screen)
+        updateState(current.withTransform(screen, old.copy(scaleX = scaleX)))
     }
 
     /** Sets the vertical (height-axis) scale of one screen; 0.5 = half height, 1.0 = full. */
@@ -297,9 +310,13 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         const val MAX_SCALE = 7.0f
         const val DEFAULT_SCALE = 1.0f
 
-        // Vertical scale (scaleY) presets used by the "纵向缩放" tools.
+        // Vertical scale (scaleY) presets used by the "高度" tools.
         const val VERTICAL_SCALE_HALF = 0.5f
         const val VERTICAL_SCALE_FULL = 1.0f
+
+        // Horizontal scale (scaleX) presets used by the "宽度" tools.
+        const val HORIZONTAL_SCALE_HALF = 0.5f
+        const val HORIZONTAL_SCALE_FULL = 1.0f
 
         // Amount each arrow tool nudges the selected screen (pixels).
         const val NUDGE_DELTA = 12f
