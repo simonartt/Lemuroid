@@ -483,6 +483,33 @@ private const val NDS_SCREEN_WIDTH = 256f
 private const val NDS_SCREEN_HEIGHT = 192f
 
 /**
+ * Computes the maximum uniform [ScreenLayoutManager.ScreenTransform.scale] that keeps the selected
+ * screen fully inside the phone's usable area (the GLRetroView bounds).
+ *
+ * The effective on-screen size is base(256×192 logical px × density) × scale × scaleX/scaleY, so the
+ * cap depends on the current independent axis scales. A screen stays on-screen when BOTH its width
+ * and height fit, hence the min() of the two per-axis limits.
+ *
+ * @param viewPos the anchor/viewport rect in root px (the usable screen area)
+ * @param density screen density (logical px → physical px)
+ * @param scaleX current horizontal (width-axis) scale of the screen
+ * @param scaleY current vertical (height-axis) scale of the screen
+ */
+internal fun maxOnScreenScale(
+    viewPos: Rect,
+    density: Float,
+    scaleX: Float,
+    scaleY: Float,
+): Float {
+    val baseWidth = NDS_SCREEN_WIDTH * density
+    val baseHeight = NDS_SCREEN_HEIGHT * density
+    val maxByWidth = if (scaleX > 0f) viewPos.width / (baseWidth * scaleX) else Float.MAX_VALUE
+    val maxByHeight = if (scaleY > 0f) viewPos.height / (baseHeight * scaleY) else Float.MAX_VALUE
+    // Never below 1x so the screen is always at least its original size; clamp into [1, MAX_SCALE].
+    return minOf(maxByWidth, maxByHeight).coerceIn(1f, ScreenLayoutManager.MAX_SCALE)
+}
+
+/**
  * Computes the natural (untouched) rects of the top and bottom screens.
  *
  * The base size is the NDS original resolution (256×192 logical px), scaled to physical px via
@@ -590,17 +617,19 @@ private fun ScreenLayoutEditorOverlay(
                                 }
                         }
                     }
-                    .pointerInput(layoutState) {
+                    .pointerInput(layoutState, viewPos) {
                         detectTransformGestures { _, pan, zoom, _ ->
                             val selected = selectedScreen.value
                             val current = layoutState.transformOf(selected)
+                            val maxScale =
+                                maxOnScreenScale(viewPos, density, current.scaleX, current.scaleY)
                             viewModel.updateScreenLayoutTransform(
                                 selected,
                                 current.offsetX + pan.x,
                                 current.offsetY + pan.y,
                                 (current.scale * zoom).coerceIn(
                                     ScreenLayoutManager.MIN_SCALE,
-                                    ScreenLayoutManager.MAX_SCALE,
+                                    maxScale,
                                 ),
                             )
                         }
@@ -656,6 +685,8 @@ private fun ScreenLayoutEditorOverlay(
                     selectedScreen = selectedScreen.value,
                     onScreenSelected = { selectedScreen.value = it },
                     isLandscape = isLandscape,
+                    viewPos = viewPos,
+                    density = density,
                     onAlignToEdge = alignToEdge,
                     onClose = { toolboxVisible.value = false },
                 )

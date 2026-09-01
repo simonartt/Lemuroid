@@ -53,6 +53,8 @@ fun ScreenLayoutEditorToolbox(
     selectedScreen: ScreenLayoutManager.ScreenId,
     onScreenSelected: (ScreenLayoutManager.ScreenId) -> Unit,
     isLandscape: Boolean,
+    viewPos: androidx.compose.ui.geometry.Rect,
+    density: Float,
     onAlignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -90,6 +92,8 @@ fun ScreenLayoutEditorToolbox(
                 viewModel = viewModel,
                 selectedScreen = selectedScreen,
                 layoutState = layoutState,
+                viewPos = viewPos,
+                density = density,
             )
         }
     }
@@ -206,9 +210,15 @@ private fun ZoomPanel(
     viewModel: BaseGameScreenViewModel,
     selectedScreen: ScreenLayoutManager.ScreenId,
     layoutState: ScreenLayoutManager.ScreenLayoutState,
+    viewPos: androidx.compose.ui.geometry.Rect,
+    density: Float,
 ) {
     val steps = if (isLandscape) intArrayOf(1, 5, 2, 6, 3, 7, 4, -1) else intArrayOf(1, 5, 2, 3, 4, -1)
     val currentScale = layoutState.transformOf(selectedScreen).scale
+    val currentTransform = layoutState.transformOf(selectedScreen)
+    // Dynamic cap: the largest uniform scale that keeps the screen inside the usable area,
+    // given its current independent width/height scales. Stepped labels above this cap are hidden.
+    val maxScale = maxOnScreenScale(viewPos, density, currentTransform.scaleX, currentTransform.scaleY)
 
     Column(verticalArrangement = Arrangement.spacedBy(if (isLandscape) 5.dp else 6.dp)) {
         for (i in steps.indices step 2) {
@@ -221,7 +231,9 @@ private fun ZoomPanel(
                         Spacer(modifier = Modifier.size(if (isLandscape) 38.dp else 44.dp))
                         continue
                     }
-                    val active = currentScale == step.toFloat()
+                    val stepFloat = step.toFloat()
+                    val clampedScale = stepFloat.coerceAtMost(maxScale)
+                    val active = currentScale == clampedScale
                     Box(
                         modifier =
                             Modifier
@@ -235,7 +247,7 @@ private fun ZoomPanel(
                                     Color(0xFF35b5e8),
                                     RoundedCornerShape(4.dp),
                                 )
-                                .clickable { viewModel.setScreenLayoutScale(selectedScreen, step.toFloat()) },
+                                .clickable { viewModel.setScreenLayoutScale(selectedScreen, clampedScale) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(

@@ -47,6 +47,20 @@
 
 ---
 
+## v1.10 - 2026-09-02
+
+### 缩放倍率动态 clamp（不超手机可用区）
+
+**需求**: 缩放面板与捏合缩放的倍率上限不应写死为 7x/5x，而应动态取「当前手机可用区的最大不超屏倍率」，保证放大后的单块屏始终完整显示在屏幕内。
+
+**实现**:
+1. `MobileGameScreen.kt` — 新增 `maxOnScreenScale(viewPos, density, scaleX, scaleY)`：以 256×192×density 为基准，最大倍率 = min(可用宽/(基准宽×scaleX), 可用高/(基准高×scaleY))，并 coerce 到 [1, MAX_SCALE]。可用区取 GLRetroView 的锚点矩形 `viewPos`。
+2. 捏合缩放（`detectTransformGestures`）与缩放面板（`ZoomPanel`）的 scale 上限从写死的 `MAX_SCALE` 改为动态 `maxOnScreenScale`；缩放面板中超过上限的档位会被 clamp 到上限值（例如小屏上 7x 档位实际只放大到 5.6x）。
+
+**说明**: clamp 作用于「单块屏」——保证单屏不超屏；双屏纵向叠加时上下屏仍可能各自完整但整体超过可用区（属于布局自由摆放，不在此约束内）。本地无 JDK/SDK，验证依赖 GitHub Actions 自动编译。
+
+---
+
 ## v1.6 - 2026-08-29
 
 ### 新增：游戏菜单「载入本地存档」（.sav 直接载入）
