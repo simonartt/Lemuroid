@@ -64,6 +64,19 @@ jobs:
           name: lemuroid-apk
           path: dist/
 
+      - name: Purge stale release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Delete every existing asset under tag "latest" so only the current
+          # Lemuroid-NDS-*.apk + SHA256SUMS.txt remain. Old builds used different
+          # names (Lemuroid-1.17.0-v8a.apk, Lemuroid-1.18.0-v8b.apk) and would
+          # otherwise pile up alongside the new naming scheme.
+          set -e
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases/tags/latest" --jq '.assets[].id' 2>/dev/null); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id" >/dev/null || true
+          done
+
       - name: "Publish GitHub Release (tag latest)"
         uses: softprops/action-gh-release@v2
         with:
