@@ -37,14 +37,13 @@ jobs:
         run: |
           set -e
           VER=$(grep -m1 'versionName = "' lemuroid-app/build.gradle.kts | sed 's/.*versionName = "\([^"]*\)".*/\1/')
-          SUF=$(grep -m1 'versionNameSuffix = "' lemuroid-app/build.gradle.kts | sed 's/.*versionNameSuffix = "\([^"]*\)".*/\1/')
           APK=lemuroid-app/build/outputs/apk/freeDynamic/release/lemuroid-app-free-dynamic-release.apk
           ls -la "$APK"
           mkdir -p dist
-          cp "$APK" "dist/Lemuroid-${VER}${SUF}.apk"
+          cp "$APK" "dist/Lemuroid-NDS-${VER}.apk"
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
-          echo "apk_name=Lemuroid-${VER}${SUF}.apk" >> "$GITHUB_OUTPUT"
+          echo "apk_name=Lemuroid-NDS-${VER}.apk" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
