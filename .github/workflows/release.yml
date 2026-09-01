@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: Build APK (v8a)
+    name: Build APK (v8b)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -69,7 +69,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Lemuroid V8A — latest build
+          name: Lemuroid NDS — latest build
           files: |
             dist/Lemuroid-*.apk
             dist/SHA256SUMS.txt
