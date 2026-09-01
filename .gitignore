@@ -24,3 +24,4 @@ log/
 # Backup files
 *.bak
 *.orig
+buildlog.txt
