@@ -141,6 +141,10 @@ class BaseGameScreenViewModel(
             system.id == SystemID.NDS,
             viewModelScope,
         )
+
+    // Remembered virtual-control visibility before the layout editor was opened,
+    // so it can be restored on close.
+    private var touchControlsVisibleBeforeEdit = true
     private val saves =
         GameViewModelSaves(
             appContext,
@@ -266,11 +270,16 @@ class BaseGameScreenViewModel(
 
     fun toggleEditScreenLayout(show: Boolean) {
         screenLayout.toggleEditor(show)
-        // Freeze the game while the layout editor is open; resume when it closes.
         if (show) {
+            // Hide virtual controls while editing the layout; remember the prior state.
+            touchControlsVisibleBeforeEdit = touchControls.isTouchControllerVisibleValue()
+            touchControls.setTouchControllerVisible(false)
+            // Freeze the game while the layout editor is open.
             retroGameView.retroGameView?.pauseEmulation()
         } else {
             retroGameView.retroGameView?.resumeEmulation()
+            // Restore virtual controls to the state they were in before editing.
+            touchControls.setTouchControllerVisible(touchControlsVisibleBeforeEdit)
         }
     }
 
@@ -300,6 +309,10 @@ class BaseGameScreenViewModel(
     /** Sets the gap between the selected screen and its pair. */
     fun setScreenLayoutGap(screen: ScreenLayoutManager.ScreenId, gap: Float) =
         screenLayout.setGap(screen, gap)
+
+    /** Sets the absolute pixel offset of the selected screen (align/center tools). */
+    fun setScreenLayoutOffset(screen: ScreenLayoutManager.ScreenId, offsetX: Float, offsetY: Float) =
+        screenLayout.setOffset(screen, offsetX, offsetY)
 
     /** Sets the uniform scale of the selected screen (zoom-panel steps). */
     fun setScreenLayoutScale(screen: ScreenLayoutManager.ScreenId, scale: Float) =

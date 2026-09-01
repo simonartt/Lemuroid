@@ -57,6 +57,11 @@ class GameViewModelScreenLayout(
         scope.launch { screenLayoutManager.setVerticalScale(screen, scaleY) }
     }
 
+    /** Sets the absolute pixel offset of one screen (used by align/center tools). */
+    fun setOffset(screen: ScreenId, offsetX: Float, offsetY: Float) {
+        scope.launch { screenLayoutManager.setOffset(screen, offsetX, offsetY) }
+    }
+
     /** Sets the gap to the paired screen. */
     fun setGap(screen: ScreenId, gap: Float) {
         scope.launch { screenLayoutManager.setGap(screen, gap) }

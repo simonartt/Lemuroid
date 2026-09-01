@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -96,6 +97,7 @@ import timber.log.Timber
 fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isLandscape = constraints.maxWidth > constraints.maxHeight
+        val density = LocalDensity.current.density
 
         LaunchedEffect(isLandscape) {
             val orientation =
@@ -181,7 +183,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                     viewModel.isNdsSystem() && screenLayout != null && !screenLayout.isDefault
                 if (applyCustomLayout) {
                     // Split rendering: top/bottom halves of the frame get independent rects
-                    val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos)
+                    val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, density)
                     val topRect = applyScreenLayoutTransform(naturalTop, screenLayout!!.topScreen, gapSign = -1f)
                     val bottomRect = applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen, gapSign = +1f)
                     val topViewport = normalizeToFullScreen(topRect, fullPos)
@@ -278,6 +280,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 viewPos = viewportPosition.value,
                 screenWidthPx = screenWidthPx,
                 screenHeightPx = screenHeightPx,
+                density = density,
             )
         }
 
@@ -475,41 +478,38 @@ private fun MenuEditTouchControlRow(
     }
 }
 
-/** NDS frame is a vertical stack of two 256x192 screens → 256x384. */
-private const val NDS_FRAME_ASPECT = 256f / 384f
+/** NDS single-screen resolution in logical pixels. */
+private const val NDS_SCREEN_WIDTH = 256f
+private const val NDS_SCREEN_HEIGHT = 192f
 
 /**
- * Computes the natural (untouched) rects of the top and bottom screens: the full frame is
- * aspect-fitted into [anchor], then split in half vertically.
+ * Computes the natural (untouched) rects of the top and bottom screens.
+ *
+ * The base size is the NDS original resolution (256×192 logical px), scaled to physical px via
+ * [density]. Each screen is centered horizontally on the anchor and stacked vertically around the
+ * anchor's vertical center, flush against each other. The zoom panel's 1x..7x then multiplies
+ * this base size (see [applyScreenLayoutTransform]).
  */
-private fun computeNaturalScreenRects(anchor: Rect): Pair<Rect, Rect> {
-    val anchorAspect = anchor.width / anchor.height
-    val pictureWidth: Float
-    val pictureHeight: Float
-    if (anchorAspect > NDS_FRAME_ASPECT) {
-        pictureHeight = anchor.height
-        pictureWidth = pictureHeight * NDS_FRAME_ASPECT
-    } else {
-        pictureWidth = anchor.width
-        pictureHeight = pictureWidth / NDS_FRAME_ASPECT
-    }
+private fun computeNaturalScreenRects(anchor: Rect, density: Float): Pair<Rect, Rect> {
+    val screenWidth = NDS_SCREEN_WIDTH * density
+    val screenHeight = NDS_SCREEN_HEIGHT * density
     val centerX = (anchor.left + anchor.right) / 2f
     val centerY = (anchor.top + anchor.bottom) / 2f
-    val pictureLeft = centerX - pictureWidth / 2f
-    val pictureTop = centerY - pictureHeight / 2f
+    val left = centerX - screenWidth / 2f
+    val right = centerX + screenWidth / 2f
     val top =
         Rect(
-            left = pictureLeft,
-            top = pictureTop,
-            right = pictureLeft + pictureWidth,
-            bottom = pictureTop + pictureHeight / 2f,
+            left = left,
+            top = centerY - screenHeight,
+            right = right,
+            bottom = centerY,
         )
     val bottom =
         Rect(
-            left = pictureLeft,
-            top = pictureTop + pictureHeight / 2f,
-            right = pictureLeft + pictureWidth,
-            bottom = pictureTop + pictureHeight,
+            left = left,
+            top = centerY,
+            right = right,
+            bottom = centerY + screenHeight,
         )
     return top to bottom
 }
@@ -563,11 +563,14 @@ private fun ScreenLayoutEditorOverlay(
     viewPos: Rect?,
     screenWidthPx: Float,
     screenHeightPx: Float,
+    density: Float,
 ) {
     val selectedScreen = remember { mutableStateOf(ScreenLayoutManager.ScreenId.TOP) }
+    // Toolbox is collapsed by default; a centered button opens it.
+    val toolboxVisible = remember { mutableStateOf(false) }
 
     if (fullPos != null && viewPos != null) {
-        val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos)
+        val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, density)
         val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f)
         val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f)
 
@@ -616,25 +619,80 @@ private fun ScreenLayoutEditorOverlay(
                 )
             }
         }
-    }
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
+        // Align/center tools need geometry, so compute the target offset here and push it down.
+        val alignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit = { screen, edge ->
+            val natural = if (screen == ScreenLayoutManager.ScreenId.TOP) naturalTop else naturalBottom
+            val transform = layoutState.transformOf(screen)
+            val halfW = natural.width * transform.scale * transform.scaleX / 2f
+            val halfH = natural.height * transform.scale * transform.scaleY / 2f
+            val cx = natural.center.x
+            val cy = natural.center.y
+            val (ox, oy) =
+                when (edge) {
+                    AlignEdge.TOP -> transform.offsetX to (viewPos.top - (cy - halfH))
+                    AlignEdge.BOTTOM -> transform.offsetX to (viewPos.bottom - (cy + halfH))
+                    AlignEdge.LEFT -> (viewPos.left - (cx - halfW)) to transform.offsetY
+                    AlignEdge.RIGHT -> (viewPos.right - (cx + halfW)) to transform.offsetY
+                    AlignEdge.CENTER -> 0f to 0f
+                }
+            viewModel.setScreenLayoutOffset(screen, ox, oy)
+        }
+
+        Box(
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            val isLandscape = screenWidthPx > screenHeightPx
+            if (!toolboxVisible.value) {
+                OpenToolboxButton(
+                    modifier = Modifier.align(Alignment.Center),
+                    onClick = { toolboxVisible.value = true },
+                )
+            } else {
+                ScreenLayoutEditorToolbox(
+                    modifier = Modifier.align(Alignment.Center),
+                    viewModel = viewModel,
+                    layoutState = layoutState,
+                    selectedScreen = selectedScreen.value,
+                    onScreenSelected = { selectedScreen.value = it },
+                    isLandscape = isLandscape,
+                    onAlignToEdge = alignToEdge,
+                    onClose = { toolboxVisible.value = false },
+                )
+                ScreenLayoutBottomBar(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    viewModel = viewModel,
+                    isLandscape = isLandscape,
+                    onCloseToolbox = { toolboxVisible.value = false },
+                )
+            }
+        }
+    }
+}
+
+/** Centered button that opens the collapsed layout toolbox. */
+@Composable
+private fun OpenToolboxButton(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = CircleShape,
+        color = Color(0xCC1C1C20),
+        shadowElevation = 8.dp,
     ) {
-        val isLandscape = screenWidthPx > screenHeightPx
-        ScreenLayoutEditorToolbox(
-            modifier = Modifier.align(Alignment.Center),
-            viewModel = viewModel,
-            layoutState = layoutState,
-            selectedScreen = selectedScreen.value,
-            onScreenSelected = { selectedScreen.value = it },
-            isLandscape = isLandscape,
-        )
-        ScreenLayoutBottomBar(
-            modifier = Modifier.align(Alignment.BottomCenter),
-            viewModel = viewModel,
-            isLandscape = isLandscape,
-        )
+        Box(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "工具箱",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 

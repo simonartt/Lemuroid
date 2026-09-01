@@ -134,6 +134,13 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         updateState(current.withTransform(screen, old.copy(scaleY = scaleY)))
     }
 
+    /** Sets the absolute pixel offset of one screen relative to its natural center. */
+    suspend fun setOffset(screen: ScreenId, offsetX: Float, offsetY: Float) {
+        val current = stateFlow.value
+        val old = current.transformOf(screen)
+        updateState(current.withTransform(screen, old.copy(offsetX = offsetX, offsetY = offsetY)))
+    }
+
     /** Sets the gap between the selected screen and its pair. */
     suspend fun setGap(screen: ScreenId, gap: Float) {
         val current = stateFlow.value
