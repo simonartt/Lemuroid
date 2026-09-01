@@ -17,9 +17,8 @@ project.properties
 .externalNativeBuild
 local.properties
 
-# Local work files (memory, design docs) - not part of the source tree
+# Local work files (memory, dev logs) - not part of the source tree
 .workbuddy/
-docs/
 log/
 
 # Backup files
