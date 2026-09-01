@@ -4,6 +4,30 @@
 
 ---
 
+## v1.8 - 2026-09-01
+
+### 新增：NDS 屏幕编辑器全新 UI（浮动词条工具箱）+ 应用更名
+
+**需求**: 将自设计的「NDS 屏幕编辑器」交互 UI 套入模拟器，替代旧的滑杆式布局编辑器。两个屏幕分开独立调整——通过触摸点击画面上的虚线框选择屏幕，再用 UI 按钮精调。
+
+**实现**（分支 `v8b-nds-editor`，版本 1.18.0-v8b，应用名改为 **Lemuroid NDS**）:
+
+1. **数据模型扩展**（`ScreenLayoutManager.kt`）:
+   - `ScreenTransform` 新增 `scaleY`（纵向缩放）与 `gap`（两屏间距），旧 JSON 反序列化向后兼容
+   - 新增 `adjustTransform` / `setVerticalScale` / `setGap`，`MAX_SCALE` 提升至 7.0
+2. **渲染逻辑**（`MobileGameScreen.kt`）:
+   - `applyScreenLayoutTransform` 支持 scaleY 与 gap（gapSign：上屏 -1、下屏 +1）
+   - 删除旧 `MenuEditScreenLayout` 编辑器，底部改为浮动词条工具箱 + 底部操作栏
+3. **新 UI**（`ScreenLayoutEditorToolbox.kt`，新增）:
+   - `ScreenLayoutEditorToolbox`：居中浮动词条，4×3 工具网格 + 缩放面板（横屏 1x-7x / 竖屏 1x-5x，当前档高亮）
+   - `ScreenLayoutBottomBar`：底部操作栏（菜单/重设回默认/关闭工具箱/调整屏幕大小）
+   - 工具映射：纵向缩放50%/100%、上下左右移动、水平/垂直间距(+gap)、间距100%(gap=0)、原始尺寸(重置本屏)
+4. **ViewModel 转发**（`GameViewModelScreenLayout.kt` / `BaseGameScreenViewModel.kt`）: 新增 `updateTransform`(对象重载)、`nudgeScreenLayout`、`setScreenLayoutVerticalScale`、`setScreenLayoutGap`、`setScreenLayoutScale`
+
+**说明**: 副标题（桌面显示名）由 `Lemuroid V8A` 改为 `Lemuroid NDS`。版本号 `versionCode 254 / versionName 1.18.0 / suffix -v8b`。本次由 GitHub Actions 在 `v8b-nds-editor` 分支触发自动编译，产出 `Lemuroid-1.18.0-v8b.apk` 发布至 latest Release。
+
+---
+
 ## v1.6 - 2026-08-29
 
 ### 新增：游戏菜单「载入本地存档」（.sav 直接载入）

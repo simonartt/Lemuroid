@@ -70,7 +70,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
 import androidx.constraintlayout.compose.ConstraintLayout
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.swordfish.lemuroid.app.shared.game.BaseGameScreenViewModel
@@ -183,8 +182,8 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 if (applyCustomLayout) {
                     // Split rendering: top/bottom halves of the frame get independent rects
                     val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos)
-                    val topRect = applyScreenLayoutTransform(naturalTop, screenLayout!!.topScreen)
-                    val bottomRect = applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen)
+                    val topRect = applyScreenLayoutTransform(naturalTop, screenLayout!!.topScreen, gapSign = -1f)
+                    val bottomRect = applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen, gapSign = +1f)
                     val topViewport = normalizeToFullScreen(topRect, fullPos)
                     val bottomViewport = normalizeToFullScreen(bottomRect, fullPos)
                     Timber.d("Setting split viewport: top=$topViewport bottom=$bottomViewport")
@@ -515,20 +514,25 @@ private fun computeNaturalScreenRects(anchor: Rect): Pair<Rect, Rect> {
     return top to bottom
 }
 
-/** Applies a per-screen transform (scale around own center + pixel translation). */
+/** Applies a per-screen transform (scale around own center + pixel translation + vertical gap). */
 private fun applyScreenLayoutTransform(
     base: Rect,
     transform: ScreenLayoutManager.ScreenTransform,
+    gapSign: Float = 0f,
 ): Rect {
     val centerX = (base.left + base.right) / 2f
     val centerY = (base.top + base.bottom) / 2f
     val halfWidth = (base.right - base.left) * transform.scale / 2f
-    val halfHeight = (base.bottom - base.top) * transform.scale / 2f
+    // Effective height = uniform scale × vertical (height-axis) scale.
+    val halfHeight = (base.bottom - base.top) * transform.scale * transform.scaleY / 2f
+    // gap pushes the screen along the vertical stack axis: top screen gapSign=-1 (up),
+    // bottom screen gapSign=+1 (down). This increases the spacing between the two screens.
+    val gapOffsetY = transform.gap * gapSign
     return Rect(
         left = centerX - halfWidth + transform.offsetX,
-        top = centerY - halfHeight + transform.offsetY,
+        top = centerY - halfHeight + transform.offsetY + gapOffsetY,
         right = centerX + halfWidth + transform.offsetX,
-        bottom = centerY + halfHeight + transform.offsetY,
+        bottom = centerY + halfHeight + transform.offsetY + gapOffsetY,
     )
 }
 
@@ -563,8 +567,8 @@ private fun ScreenLayoutEditorOverlay(
 
     if (fullPos != null && viewPos != null) {
         val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos)
-        val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen)
-        val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen)
+        val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f)
+        val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f)
 
         Box(
             modifier =
@@ -615,15 +619,20 @@ private fun ScreenLayoutEditorOverlay(
 
     Box(
         modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.BottomCenter,
     ) {
-        MenuEditScreenLayout(
+        val isLandscape = screenWidthPx > screenHeightPx
+        ScreenLayoutEditorToolbox(
+            modifier = Modifier.align(Alignment.Center),
             viewModel = viewModel,
             layoutState = layoutState,
             selectedScreen = selectedScreen.value,
             onScreenSelected = { selectedScreen.value = it },
-            screenWidthPx = screenWidthPx,
-            screenHeightPx = screenHeightPx,
+            isLandscape = isLandscape,
+        )
+        ScreenLayoutBottomBar(
+            modifier = Modifier.align(Alignment.BottomCenter),
+            viewModel = viewModel,
+            isLandscape = isLandscape,
         )
     }
 }
@@ -643,226 +652,6 @@ private fun DrawScope.drawScreenFrame(
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 14f)),
             ),
     )
-}
-
-@Composable
-private fun MenuEditScreenLayout(
-    viewModel: BaseGameScreenViewModel,
-    layoutState: ScreenLayoutManager.ScreenLayoutState,
-    selectedScreen: ScreenLayoutManager.ScreenId,
-    onScreenSelected: (ScreenLayoutManager.ScreenId) -> Unit,
-    screenWidthPx: Float,
-    screenHeightPx: Float,
-) {
-    val profileExpanded = remember { mutableStateOf(false) }
-    val showSaveDialog = remember { mutableStateOf(false) }
-    val saveDialogName = remember { mutableStateOf("") }
-
-    val activeProfile = layoutState.activeProfileId?.let { layoutState.profiles[it] }
-    val transform = layoutState.transformOf(selectedScreen)
-
-    Card(
-        modifier =
-            Modifier
-                .widthIn(max = 480.dp)
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            // Screen selector: top / bottom
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                val topSelected = selectedScreen == ScreenLayoutManager.ScreenId.TOP
-                if (topSelected) {
-                    androidx.compose.material3.Button(
-                        onClick = { onScreenSelected(ScreenLayoutManager.ScreenId.TOP) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("上屏") }
-                } else {
-                    androidx.compose.material3.OutlinedButton(
-                        onClick = { onScreenSelected(ScreenLayoutManager.ScreenId.TOP) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("上屏") }
-                }
-                if (!topSelected) {
-                    androidx.compose.material3.Button(
-                        onClick = { onScreenSelected(ScreenLayoutManager.ScreenId.BOTTOM) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("下屏") }
-                } else {
-                    androidx.compose.material3.OutlinedButton(
-                        onClick = { onScreenSelected(ScreenLayoutManager.ScreenId.BOTTOM) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("下屏") }
-                }
-            }
-
-            // Offset X
-            MenuEditTouchControlRow(Icons.Filled.ArrowBack, "水平", 0f) {
-                Slider(
-                    value = transform.offsetX.coerceIn(-screenWidthPx, screenWidthPx),
-                    onValueChange = {
-                        viewModel.updateScreenLayoutTransform(
-                            selectedScreen,
-                            it,
-                            transform.offsetY,
-                            transform.scale,
-                        )
-                    },
-                    valueRange = -screenWidthPx..screenWidthPx,
-                )
-            }
-            // Offset Y
-            MenuEditTouchControlRow(Icons.Default.ArrowDownward, "垂直", 0f) {
-                Slider(
-                    value = transform.offsetY.coerceIn(-screenHeightPx, screenHeightPx),
-                    onValueChange = {
-                        viewModel.updateScreenLayoutTransform(
-                            selectedScreen,
-                            transform.offsetX,
-                            it,
-                            transform.scale,
-                        )
-                    },
-                    valueRange = -screenHeightPx..screenHeightPx,
-                )
-            }
-            // Scale
-            MenuEditTouchControlRow(Icons.Default.OpenInFull, "缩放", 0f) {
-                Slider(
-                    value =
-                        transform.scale.coerceIn(
-                            ScreenLayoutManager.MIN_SCALE,
-                            ScreenLayoutManager.MAX_SCALE,
-                        ),
-                    onValueChange = {
-                        viewModel.updateScreenLayoutTransform(
-                            selectedScreen,
-                            transform.offsetX,
-                            transform.offsetY,
-                            it,
-                        )
-                    },
-                    valueRange = ScreenLayoutManager.MIN_SCALE..ScreenLayoutManager.MAX_SCALE,
-                )
-            }
-
-            // Profile selector
-            androidx.compose.material3.ExposedDropdownMenuBox(
-                expanded = profileExpanded.value,
-                onExpandedChange = { profileExpanded.value = !profileExpanded.value },
-            ) {
-                androidx.compose.material3.TextField(
-                    value = activeProfile?.name ?: "自定义（未保存）",
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("布局方案") },
-                    trailingIcon = {
-                        androidx.compose.material3.ExposedDropdownMenuDefaults.TrailingIcon(
-                            expanded = profileExpanded.value,
-                        )
-                    },
-                    modifier =
-                        Modifier
-                            .menuAnchor()
-                            .fillMaxWidth(),
-                )
-                androidx.compose.material3.DropdownMenu(
-                    expanded = profileExpanded.value,
-                    onDismissRequest = { profileExpanded.value = false },
-                ) {
-                    if (layoutState.profiles.isEmpty()) {
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("暂无已保存方案") },
-                            onClick = { profileExpanded.value = false },
-                        )
-                    }
-                    layoutState.profiles.forEach { (id, profile) ->
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(profile.name) },
-                            onClick = {
-                                viewModel.selectScreenLayoutProfile(id)
-                                profileExpanded.value = false
-                            },
-                        )
-                    }
-                }
-            }
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(
-                    onClick = {
-                        saveDialogName.value = activeProfile?.name ?: viewModel.suggestScreenLayoutProfileName()
-                        showSaveDialog.value = true
-                    },
-                ) { Text("保存方案") }
-                if (layoutState.activeProfileId != null) {
-                    TextButton(
-                        onClick = { viewModel.deleteScreenLayoutProfile(layoutState.activeProfileId!!) },
-                    ) { Text("删除方案") }
-                }
-                TextButton(onClick = { viewModel.resetScreenLayoutScreen(selectedScreen) }) { Text("重置本屏") }
-            }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { viewModel.resetScreenLayoutToDefault() }) { Text("全部重置") }
-                TextButton(onClick = { viewModel.toggleEditScreenLayout(false) }) { Text("完成") }
-            }
-        }
-    }
-
-    if (showSaveDialog.value) {
-        Dialog(onDismissRequest = { showSaveDialog.value = false }) {
-            Card {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text("保存布局方案")
-                    androidx.compose.material3.TextField(
-                        value = saveDialogName.value,
-                        onValueChange = { saveDialogName.value = it },
-                        label = { Text("方案名称") },
-                        singleLine = true,
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        TextButton(onClick = { showSaveDialog.value = false }) { Text("取消") }
-                        if (layoutState.activeProfileId != null) {
-                            TextButton(
-                                onClick = {
-                                    val trimmedName = saveDialogName.value.trim()
-                                    viewModel.overwriteActiveScreenLayoutProfile(
-                                        if (trimmedName.isEmpty()) null else trimmedName,
-                                    )
-                                    showSaveDialog.value = false
-                                },
-                            ) { Text("覆盖当前") }
-                        }
-                        TextButton(
-                            onClick = {
-                                val name =
-                                    saveDialogName.value.ifBlank {
-                                        viewModel.suggestScreenLayoutProfileName()
-                                    }
-                                viewModel.saveScreenLayoutAsNewProfile(name)
-                                showSaveDialog.value = false
-                            },
-                        ) { Text("存为新方案") }
-                    }
-                }
-            }
-        }
-    }
 }
 
 /**

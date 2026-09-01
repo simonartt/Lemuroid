@@ -16,3 +16,12 @@ project.properties
 .gradle
 .externalNativeBuild
 local.properties
+
+# Local work files (memory, design docs) - not part of the source tree
+.workbuddy/
+docs/
+log/
+
+# Backup files
+*.bak
+*.orig

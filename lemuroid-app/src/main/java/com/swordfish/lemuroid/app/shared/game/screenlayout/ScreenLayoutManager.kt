@@ -28,9 +28,15 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         val offsetX: Float = 0f,
         val offsetY: Float = 0f,
         val scale: Float = 1.0f,
+        // v2: vertical (height-axis) scale, independent of [scale]. 1.0 = original height.
+        // Used by "纵向缩放 50%/100%" tools; combined with [scale] => effectiveHeight = base * scale * scaleY.
+        val scaleY: Float = 1.0f,
+        // v2: gap to the paired screen (pixels). Positive = move away, negative = overlap.
+        // In the vertical-stack (portrait) layout this is the vertical spacing between the two screens.
+        val gap: Float = 0f,
     ) {
         val isDefault: Boolean
-            get() = offsetX == 0f && offsetY == 0f && scale == 1.0f
+            get() = offsetX == 0f && offsetY == 0f && scale == 1.0f && scaleY == 1.0f && gap == 0f
 
         companion object {
             val DEFAULT = ScreenTransform()
@@ -77,9 +83,49 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
 
     fun currentState(): ScreenLayoutState = stateFlow.value
 
-    suspend fun updateTransform(screen: ScreenId, offsetX: Float, offsetY: Float, scale: Float) {
+    /** Replaces the transform of one screen wholesale. */
+    suspend fun updateTransform(screen: ScreenId, transform: ScreenTransform) {
         val current = stateFlow.value
-        updateState(current.withTransform(screen, ScreenTransform(offsetX, offsetY, scale)))
+        updateState(current.withTransform(screen, transform))
+    }
+
+    /** Copies the transform of one screen and applies a delta to the given fields. */
+    suspend fun adjustTransform(
+        screen: ScreenId,
+        deltaOffsetX: Float = 0f,
+        deltaOffsetY: Float = 0f,
+        deltaScale: Float = 1f,
+        deltaScaleY: Float = 1f,
+        deltaGap: Float = 0f,
+    ) {
+        val current = stateFlow.value
+        val old = current.transformOf(screen)
+        updateState(
+            current.withTransform(
+                screen,
+                old.copy(
+                    offsetX = old.offsetX + deltaOffsetX,
+                    offsetY = old.offsetY + deltaOffsetY,
+                    scale = old.scale * deltaScale,
+                    scaleY = old.scaleY * deltaScaleY,
+                    gap = old.gap + deltaGap,
+                ),
+            ),
+        )
+    }
+
+    /** Sets the vertical (height-axis) scale of one screen; 0.5 = half height, 1.0 = full. */
+    suspend fun setVerticalScale(screen: ScreenId, scaleY: Float) {
+        val current = stateFlow.value
+        val old = current.transformOf(screen)
+        updateState(current.withTransform(screen, old.copy(scaleY = scaleY)))
+    }
+
+    /** Sets the gap between the selected screen and its pair. */
+    suspend fun setGap(screen: ScreenId, gap: Float) {
+        val current = stateFlow.value
+        val old = current.transformOf(screen)
+        updateState(current.withTransform(screen, old.copy(gap = gap)))
     }
 
     /** Saves current working values as a new profile. Returns the new profile id. */
@@ -247,7 +293,18 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         private const val PREF_KEY = "nds_screen_layout_settings"
 
         const val MIN_SCALE = 0.5f
-        const val MAX_SCALE = 2.0f
+        // Raised from 2.0 to support the zoom panel's 1x..7x stepped scale in the new editor UI.
+        const val MAX_SCALE = 7.0f
         const val DEFAULT_SCALE = 1.0f
+
+        // Vertical scale (scaleY) presets used by the "纵向缩放" tools.
+        const val VERTICAL_SCALE_HALF = 0.5f
+        const val VERTICAL_SCALE_FULL = 1.0f
+
+        // Amount each arrow tool nudges the selected screen (pixels).
+        const val NUDGE_DELTA = 12f
+
+        // Amount "间距" tools change the gap per press (pixels).
+        const val GAP_DELTA = 8f
     }
 }

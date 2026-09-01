@@ -277,6 +277,22 @@ class BaseGameScreenViewModel(
         scale: Float,
     ) = screenLayout.updateTransform(screen, offsetX, offsetY, scale)
 
+    /** Nudges the selected screen by a pixel delta (arrow tools). */
+    fun nudgeScreenLayout(screen: ScreenLayoutManager.ScreenId, dx: Float, dy: Float) =
+        screenLayout.nudge(screen, dx, dy)
+
+    /** Sets the vertical (height-axis) scale of the selected screen. */
+    fun setScreenLayoutVerticalScale(screen: ScreenLayoutManager.ScreenId, scaleY: Float) =
+        screenLayout.setVerticalScale(screen, scaleY)
+
+    /** Sets the gap between the selected screen and its pair. */
+    fun setScreenLayoutGap(screen: ScreenLayoutManager.ScreenId, gap: Float) =
+        screenLayout.setGap(screen, gap)
+
+    /** Sets the uniform scale of the selected screen (zoom-panel steps). */
+    fun setScreenLayoutScale(screen: ScreenLayoutManager.ScreenId, scale: Float) =
+        screenLayout.setScale(screen, scale)
+
     fun saveScreenLayoutAsNewProfile(name: String) = screenLayout.saveAsNewProfile(name)
 
     fun overwriteActiveScreenLayoutProfile(newName: String? = null) =

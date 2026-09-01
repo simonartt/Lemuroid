@@ -33,7 +33,35 @@ class GameViewModelScreenLayout(
     fun currentLayoutState(): ScreenLayoutState = screenLayoutManager.currentState()
 
     fun updateTransform(screen: ScreenId, offsetX: Float, offsetY: Float, scale: Float) {
-        scope.launch { screenLayoutManager.updateTransform(screen, offsetX, offsetY, scale) }
+        val old = screenLayoutManager.currentState().transformOf(screen)
+        scope.launch {
+            screenLayoutManager.updateTransform(
+                screen,
+                old.copy(offsetX = offsetX, offsetY = offsetY, scale = scale),
+            )
+        }
+    }
+
+    /** Nudges the selected screen by a pixel delta on the given axis. */
+    fun nudge(screen: ScreenId, dx: Float, dy: Float) {
+        scope.launch { screenLayoutManager.adjustTransform(screen, deltaOffsetX = dx, deltaOffsetY = dy) }
+    }
+
+    /** Sets the vertical (height-axis) scale; 0.5 = half height, 1.0 = full. */
+    fun setVerticalScale(screen: ScreenId, scaleY: Float) {
+        scope.launch { screenLayoutManager.setVerticalScale(screen, scaleY) }
+    }
+
+    /** Sets the gap to the paired screen. */
+    fun setGap(screen: ScreenId, gap: Float) {
+        scope.launch { screenLayoutManager.setGap(screen, gap) }
+    }
+
+    /** Sets the uniform scale of one screen (zoom-panel steps). */
+    fun setScale(screen: ScreenId, scale: Float) {
+        scope.launch {
+            screenLayoutManager.updateTransform(screen, screenLayoutManager.currentState().transformOf(screen).copy(scale = scale))
+        }
     }
 
     fun saveAsNewProfile(name: String) {

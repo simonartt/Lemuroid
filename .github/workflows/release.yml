@@ -2,7 +2,7 @@ name: Release (auto-build on push)
 
 on:
   push:
-    branches: [master]
+    branches: [master, v8b-nds-editor]
   workflow_dispatch:
 
 permissions:
