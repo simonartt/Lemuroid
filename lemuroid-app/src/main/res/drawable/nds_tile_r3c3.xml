@@ -20,4 +20,10 @@
     <path
             android:pathData="M33.179 13.1204H36.7409L31.9852 17.8782L27.2296 13.1204H30.7905V9.74146H33.179V13.1204Z"
             android:fillColor="#FF202020"/>
+    <path
+            android:pathData="M10.8324 19.7702 H53.1381 V21.7702 H10.8324 Z"
+            android:fillColor="#FF202020"/>
+    <path
+            android:pathData="M10.8324 26.0967 H53.1381 V28.0967 H10.8324 Z"
+            android:fillColor="#FF202020"/>
 </vector>

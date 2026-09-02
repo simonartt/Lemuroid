@@ -607,13 +607,11 @@ private fun aspectFitRect(rect: Rect, contentAspect: Float): Rect {
     )
 }
 
-/**
- * Fallback full-frame (256×384, both screens stacked) content aspect. Used only until the
- * real value reported by the loaded core is read via `GLRetroView.getAspectRatio()`; the
- * per-screen aspect in custom mode is always that core-reported value × 2 (matching the
- * native `contentAspect = aspectRatio * 2`), never a hardcoded ratio.
- */
+/** Full-frame (256×384, both screens stacked) content aspect — default layout. */
 private val NDS_FULL_FRAME_ASPECT = NDS_SCREEN_WIDTH / (NDS_SCREEN_HEIGHT * 2f)
+
+/** Single-screen (256×192) content aspect — custom/split layout per screen. */
+private val NDS_SCREEN_ASPECT = NDS_SCREEN_WIDTH / NDS_SCREEN_HEIGHT
 
 /**
  * Full-screen editor overlay for the NDS dual-screen layout customizer.
@@ -635,46 +633,30 @@ private fun ScreenLayoutEditorOverlay(
     // in the bottom bar hides it (design §7.5). No separate open button exists.
     val toolboxVisible = remember { mutableStateOf(true) }
 
-    // The loaded core reports its own full-frame aspect ratio, and different NDS cores
-    // (melonDS vs desmume) can report different values — a hardcoded 256/384 is guaranteed
-    // to be off for at least one of them. Read the real value once when the editor opens so
-    // the dashed frames match the native renderer exactly; calling getAspectRatio() every
-    // frame while dragging would block on the GL thread each time and reintroduce stutter.
-    val coreAspect = remember { mutableStateOf(NDS_FULL_FRAME_ASPECT) }
-    LaunchedEffect(Unit) {
-        try {
-            val gameView = viewModel.retroGameView.retroGameViewFlow()
-            val aspect = gameView.getAspectRatio()
-            if (aspect.isFinite() && aspect > 0f) coreAspect.value = aspect
-        } catch (_: Exception) {
-            // Keep the hardcoded fallback — editor still works, frames may be slightly off.
-        }
-    }
-
     if (fullPos != null && viewPos != null) {
         // Natural rects are needed both for display and for the align/center tools.
         val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, density)
 
         // The dashed frames MUST match what is actually rendered:
-        //  - Default layout → single viewport: the whole frame (coreAspect of width/height) is
-        //    aspect-fit into viewPos; each screen is one half of that fitted quad.
-        //  - Custom layout → split viewport: each screen rect is aspect-fit to its per-screen
-        //    aspect, exactly like the native updateForegroundQuad letterboxing where
-        //    contentAspect = aspectRatio * 2 (aspectRatio being the core-reported full frame).
+        //  - Default layout → single viewport: the whole 256×384 frame is aspect-fit into
+        //    viewPos; each screen is one half of that fitted quad.
+        //  - Custom layout → split viewport: each screen rect is aspect-fit to the single-
+        //    screen aspect (256/192), exactly like the native updateForegroundQuad letterboxing
+        //    where contentAspect = fullFrameAspect * 2 (= 256/384 * 2 = 256/192).
         val applyCustomLayout = viewModel.isNdsSystem() && !layoutState.isDefault
         val topRect: Rect
         val bottomRect: Rect
         if (applyCustomLayout) {
             topRect = aspectFitRect(
                 applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f),
-                coreAspect.value * 2f,
+                NDS_SCREEN_ASPECT,
             )
             bottomRect = aspectFitRect(
                 applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f),
-                coreAspect.value * 2f,
+                NDS_SCREEN_ASPECT,
             )
         } else {
-            val fittedFull = aspectFitRect(viewPos, coreAspect.value)
+            val fittedFull = aspectFitRect(viewPos, NDS_FULL_FRAME_ASPECT)
             val midY = (fittedFull.top + fittedFull.bottom) / 2f
             topRect = Rect(fittedFull.left, fittedFull.top, fittedFull.right, midY)
             bottomRect = Rect(fittedFull.left, midY, fittedFull.right, fittedFull.bottom)
@@ -777,12 +759,13 @@ private fun ScreenLayoutEditorOverlay(
                     onClose = { toolboxVisible.value = false },
                 )
             }
-            // Bottom bar is ALWAYS visible — only the center button / toolbox panel toggle.
+            // Bottom bar is ALWAYS visible — the 关闭/打开工具箱 item toggles the panel.
             ScreenLayoutBottomBar(
                 modifier = Modifier.align(Alignment.BottomCenter),
                 viewModel = viewModel,
                 isLandscape = isLandscape,
-                onCloseToolbox = { toolboxVisible.value = false },
+                toolboxVisible = toolboxVisible.value,
+                onToggleToolbox = { toolboxVisible.value = !toolboxVisible.value },
             )
         }
     }

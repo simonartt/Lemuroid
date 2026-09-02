@@ -218,7 +218,8 @@ private fun ZoomPanel(
     viewPos: androidx.compose.ui.geometry.Rect,
     density: Float,
 ) {
-    val steps = if (isLandscape) intArrayOf(1, 5, 2, 6, 3, 7, 4, -1) else intArrayOf(1, 5, 2, 3, 4, -1)
+    // Sequential left-to-right, top-to-bottom: [1x,2x] / [3x,4x] / [5x,…].
+    val steps = if (isLandscape) intArrayOf(1, 2, 3, 4, 5, 6, 7, -1) else intArrayOf(1, 2, 3, 4, 5, -1)
     val currentScale = layoutState.transformOf(selectedScreen).scale
     val currentTransform = layoutState.transformOf(selectedScreen)
     // Dynamic cap: the largest uniform scale that keeps the screen inside the usable area,
@@ -238,7 +239,10 @@ private fun ZoomPanel(
                     }
                     val stepFloat = step.toFloat()
                     val clampedScale = stepFloat.coerceAtMost(maxScale)
-                    val active = currentScale == clampedScale
+                    // Highlight only the button whose own value equals the current scale.
+                    // Comparing against clampedScale used to light up every button above the
+                    // cap at once (e.g. at 2x with a 1.5x cap, 3x/4x/5x all turned blue).
+                    val active = stepFloat <= maxScale && currentScale == stepFloat
                     Box(
                         modifier =
                             Modifier
@@ -270,14 +274,15 @@ private fun ZoomPanel(
 
 /**
  * Bottom action bar — design §5, exactly five items:
- * 菜单 / 重设回默认 / 编辑全局布局(禁用) / 关闭工具箱 / 调整屏幕大小.
+ * 菜单 / 重设回默认 / 编辑全局布局(禁用) / 关闭工具箱·打开工具箱(切换) / 调整屏幕大小.
  */
 @Composable
 fun ScreenLayoutBottomBar(
     modifier: Modifier = Modifier,
     viewModel: BaseGameScreenViewModel,
     isLandscape: Boolean,
-    onCloseToolbox: () -> Unit,
+    toolboxVisible: Boolean,
+    onToggleToolbox: () -> Unit,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -294,7 +299,10 @@ fun ScreenLayoutBottomBar(
             BottomBarItem("重设回默认", enabled = true) { viewModel.resetScreenLayoutToDefault() }
             // Reserved global-layout entry — disabled per design (rgba(255,255,255,0.4)).
             BottomBarItem("编辑全局布局", enabled = false) {}
-            BottomBarItem("关闭工具箱", enabled = true) { onCloseToolbox() }
+            BottomBarItem(
+                label = if (toolboxVisible) "关闭工具箱" else "打开工具箱",
+                enabled = true,
+            ) { onToggleToolbox() }
             BottomBarItem("调整屏幕大小", enabled = true) { viewModel.toggleEditScreenLayout(false) }
         }
     }

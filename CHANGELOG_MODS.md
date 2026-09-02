@@ -4,6 +4,19 @@
 
 ---
 
+## v1.11 - 2026-09-01
+
+### 修复：NDS 编辑器四个 BUG（版本升至 1.19.2-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 257 / versionName 1.19.2 / suffix -v8b**:
+
+1. **虚线框与游戏画面不同步** — v1.10 引入的「动态读取 core 宽高比」存在时序问题：编辑器打开时 core 可能尚未报告 geometry，`getAspectRatio()` 返回默认值 1.0（而非 256/384≈0.667），导致虚线框整体错位。回退为硬编码常量：默认布局用整帧 `256/384`、自定义布局每屏用单屏 `256/192`（= 原生 `aspectRatio * 2`，与 `videolayout.cpp` letterbox 数学一致），删除 `LaunchedEffect` 中的动态读取。
+2. **工具箱无法重新打开** — 底栏按钮原先固定显示「关闭工具箱」且只能关。现改为状态切换：面板可见时显示「关闭工具箱」，隐藏后变为「打开工具箱」，点击即开/关（`ScreenLayoutBottomBar` 新增 `toolboxVisible` / `onToggleToolbox` 参数）。
+3. **瓦片图标不完整** — R1C1、R1C3、R1C4、R2C1、R2C3、R2C4、R3C2、R3C3 八个图标缺少表示对齐基准的横条/竖条，按设计稿补齐。
+4. **倍数放大按钮选中态错误 + 排序** — 原 `active = currentScale == clampedScale`：当上限低于某些档位时（如 1x 屏上限 1.5），3x/4x/5x… 全部被 clamp 到同一值、同时高亮变蓝。改为 `stepFloat <= maxScale && currentScale == stepFloat`，只有自身值等于当前倍数的按钮才高亮；档位顺序由列优先（1,5,2,6,…）改为顺序排列（横屏 1~7x、竖屏 1~5x，从左到右从上到下）。
+
+---
+
 ## v1.10 - 2026-09-01
 
 ### 修复：NDS 编辑器工具箱 UI 还原 + 虚线框与渲染严格同源（版本升至 1.19.1-v8b）
