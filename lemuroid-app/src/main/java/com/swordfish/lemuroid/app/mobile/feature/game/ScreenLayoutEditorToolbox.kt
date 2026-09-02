@@ -48,7 +48,8 @@ fun ScreenLayoutEditorToolbox(
     selectedScreen: ScreenLayoutManager.ScreenId,
     onScreenSelected: (ScreenLayoutManager.ScreenId) -> Unit,
     isLandscape: Boolean,
-    viewPos: androidx.compose.ui.geometry.Rect,
+    displayWidthPx: Float,
+    displayHeightPx: Float,
     density: Float,
     onAlignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit,
     onClose: () -> Unit,
@@ -64,14 +65,15 @@ fun ScreenLayoutEditorToolbox(
             horizontalArrangement = Arrangement.spacedBy(if (isLandscape) 8.dp else 10.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            // 4×3 tool grid (left) — icons are the design's own SVG tiles.
+            // Tool grid (left) — icons are the design's own SVG tiles.
+            // Portrait mode uses a 4×4 arrangement with R1C4/R2C4 promoted to the top row.
+            val grid = if (isLandscape) TOOL_GRID_LANDSCAPE else TOOL_GRID_PORTRAIT
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                for (row in 0 until 3) {
+                for (row in grid.indices) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        for (col in 0 until 4) {
+                        for (col in grid[row].indices) {
                             ToolGridButton(
-                                row = row,
-                                col = col,
+                                cell = grid[row][col],
                                 viewModel = viewModel,
                                 selectedScreen = selectedScreen,
                                 onAlignToEdge = onAlignToEdge,
@@ -86,24 +88,22 @@ fun ScreenLayoutEditorToolbox(
                 viewModel = viewModel,
                 selectedScreen = selectedScreen,
                 layoutState = layoutState,
-                viewPos = viewPos,
+                displayWidthPx = displayWidthPx,
+                displayHeightPx = displayHeightPx,
                 density = density,
             )
         }
     }
 }
 
-/** A single 64dp tool tile in the 4×3 grid. Renders the design's own vector tile. */
+/** A single 64dp tool tile. Renders the design's own vector tile for the cell. */
 @Composable
 private fun ToolGridButton(
-    row: Int,
-    col: Int,
+    cell: ToolCell?,
     viewModel: BaseGameScreenViewModel,
     selectedScreen: ScreenLayoutManager.ScreenId,
     onAlignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit,
 ) {
-    val cell = TOOL_GRID[row][col]
-
     Box(
         modifier =
             Modifier
@@ -116,7 +116,7 @@ private fun ToolGridButton(
                             }
                         }
                     } else {
-                        // R3C4: empty slot — keeps the 4×3 grid shape (design: visibility:hidden).
+                        // Empty slot — keeps the grid shape (design: visibility:hidden).
                         Modifier
                     },
                 ),
@@ -124,7 +124,7 @@ private fun ToolGridButton(
     ) {
         if (cell != null) {
             androidx.compose.foundation.Image(
-                painter = painterResource(id = tileDrawable(row, col)),
+                painter = painterResource(id = cell.drawable),
                 contentDescription = cell.label,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -132,68 +132,91 @@ private fun ToolGridButton(
     }
 }
 
-/** Maps a grid position to the design's exported tile drawable (figma-export/tiles/RxCy.svg). */
-private fun tileDrawable(row: Int, col: Int): Int =
-    when {
-        row == 0 && col == 0 -> R.drawable.nds_tile_r1c1
-        row == 0 && col == 1 -> R.drawable.nds_tile_r1c2
-        row == 0 && col == 2 -> R.drawable.nds_tile_r1c3
-        row == 0 && col == 3 -> R.drawable.nds_tile_r1c4
-        row == 1 && col == 0 -> R.drawable.nds_tile_r2c1
-        row == 1 && col == 1 -> R.drawable.nds_tile_r2c2
-        row == 1 && col == 2 -> R.drawable.nds_tile_r2c3
-        row == 1 && col == 3 -> R.drawable.nds_tile_r2c4
-        row == 2 && col == 0 -> R.drawable.nds_tile_r3c1
-        row == 2 && col == 1 -> R.drawable.nds_tile_r3c2
-        else -> R.drawable.nds_tile_r3c3
-    }
-
-/** A tool grid cell definition. */
+/** A tool grid cell definition. [drawable] is the design's exported tile (figma-export/tiles/RxCy.svg). */
 private class ToolCell(
     val label: String,
+    val drawable: Int,
     val action: (BaseGameScreenViewModel, ScreenId, (AlignEdge) -> Unit) -> Unit,
 )
 
+/** Shared cell actions — faithful to docs/UI-元素文档.md §4.1. */
+private val CELL_HEIGHT_50 = ToolCell(
+    "纵向缩放 50%",
+    R.drawable.nds_tile_r1c1,
+) { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_HALF) }
+
+private val CELL_ALIGN_TOP = ToolCell("上移", R.drawable.nds_tile_r1c2) { _, _, align ->
+    align(AlignEdge.TOP)
+}
+
+private val CELL_GAP_MINUS = ToolCell(
+    "水平间距调节",
+    R.drawable.nds_tile_r1c3,
+) { vm, s, _ -> nudgeGap(vm, s, -ScreenLayoutManager.GAP_DELTA) }
+
+private val CELL_HEIGHT_100 = ToolCell(
+    "纵向缩放 100%",
+    R.drawable.nds_tile_r1c4,
+) { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_FULL) }
+
+private val CELL_ALIGN_LEFT = ToolCell("左移", R.drawable.nds_tile_r2c1) { _, _, align ->
+    align(AlignEdge.LEFT)
+}
+
+private val CELL_FREE_MOVE = ToolCell("自由移动", R.drawable.nds_tile_r2c2) { _, _, align ->
+    align(AlignEdge.CENTER)
+}
+
+private val CELL_ALIGN_RIGHT = ToolCell("右移", R.drawable.nds_tile_r2c3) { _, _, align ->
+    align(AlignEdge.RIGHT)
+}
+
+private val CELL_GAP_PLUS = ToolCell(
+    "间距调节 100%",
+    R.drawable.nds_tile_r2c4,
+) { vm, s, _ -> nudgeGap(vm, s, +ScreenLayoutManager.GAP_DELTA) }
+
+private val CELL_ORIGINAL_SIZE = ToolCell("Original Size", R.drawable.nds_tile_r3c1) { vm, s, _ ->
+    vm.resetScreenLayoutScreen(s)
+}
+
+private val CELL_ALIGN_BOTTOM = ToolCell("下移", R.drawable.nds_tile_r3c2) { _, _, align ->
+    align(AlignEdge.BOTTOM)
+}
+
+private val CELL_SCREEN_GAP = ToolCell(
+    "Screen Gap",
+    R.drawable.nds_tile_r3c3,
+) { vm, s, _ -> nudgeGap(vm, s, +ScreenLayoutManager.GAP_DELTA) }
+
 /**
- * Tool grid button semantics — faithful to docs/UI-元素文档.md §4.1:
+ * Landscape arrangement — the design's 4×3 grid:
  *
- * | cell | function                                        | data field  |
- * |------|-------------------------------------------------|-------------|
- * | R1C1 | height → 50% of default                        | scaleY = 0.5 |
- * | R1C2 | align top (上移)                                | offset → top |
- * | R1C3 | horizontal gap nudge (水平间距调节, −)          | gap -= delta |
- * | R1C4 | height → 100% of default                       | scaleY = 1.0 |
- * | R2C1 | align left (左移)                               | offset → left|
- * | R2C2 | free move / re-center (自由移动)                | offset = 0   |
- * | R2C3 | align right (右移)                              | offset → right|
- * | R2C4 | gap nudge (间距调节, +)                          | gap += delta |
- * | R3C1 | original size (reset this screen)               | reset        |
- * | R3C2 | align bottom (下移)                             | offset → bottom|
- * | R3C3 | screen gap (屏幕间距调节)                        | gap += delta |
- * | R3C4 | empty placeholder                               | —            |
+ * | R1C1 高度50% | R1C2 上移 | R1C3 水平间距− | R1C4 高度100% |
+ * | R2C1 左移    | R2C2 自由移动 | R2C3 右移   | R2C4 间距+    |
+ * | R3C1 原始尺寸 | R3C2 下移 | R3C3 屏幕间距  | (空位)        |
  */
-private val TOOL_GRID: Array<Array<ToolCell?>> = arrayOf(
-    // Row 1: 高度50% / 上移 / 水平间距调节 / 高度100%
-    arrayOf(
-        ToolCell("纵向缩放 50%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_HALF) },
-        ToolCell("上移") { _, _, align -> align(AlignEdge.TOP) },
-        ToolCell("水平间距调节") { vm, s, _ -> nudgeGap(vm, s, -ScreenLayoutManager.GAP_DELTA) },
-        ToolCell("纵向缩放 100%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_FULL) },
-    ),
-    // Row 2: 左移 / 自由移动 / 右移 / 间距调节
-    arrayOf(
-        ToolCell("左移") { _, _, align -> align(AlignEdge.LEFT) },
-        ToolCell("自由移动") { _, _, align -> align(AlignEdge.CENTER) },
-        ToolCell("右移") { _, _, align -> align(AlignEdge.RIGHT) },
-        ToolCell("间距调节 100%") { vm, s, _ -> nudgeGap(vm, s, +ScreenLayoutManager.GAP_DELTA) },
-    ),
-    // Row 3: 原始尺寸 / 下移 / 屏幕间距 / 空位
-    arrayOf(
-        ToolCell("Original Size") { vm, s, _ -> vm.resetScreenLayoutScreen(s) },
-        ToolCell("下移") { _, _, align -> align(AlignEdge.BOTTOM) },
-        ToolCell("Screen Gap") { vm, s, _ -> nudgeGap(vm, s, +ScreenLayoutManager.GAP_DELTA) },
-        null, // R3C4 empty slot (visibility:hidden in the design)
-    ),
+private val TOOL_GRID_LANDSCAPE: Array<Array<ToolCell?>> = arrayOf(
+    arrayOf(CELL_HEIGHT_50, CELL_ALIGN_TOP, CELL_GAP_MINUS, CELL_HEIGHT_100),
+    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, CELL_ALIGN_RIGHT, CELL_GAP_PLUS),
+    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_SCREEN_GAP, null),
+)
+
+/**
+ * Portrait arrangement — same tools, re-arranged per design: R1C4 (高度100%) is placed
+ * directly above R1C1 (高度50%), and R2C4 (间距+) directly above R1C2 (上移). All other
+ * cells keep their original column positions:
+ *
+ * | 高度100% | 间距+   | (空)   | (空)   |
+ * | 高度50%  | 上移    | 水平间距−| (空)   |
+ * | 左移     | 自由移动 | 右移    | (空)   |
+ * | 原始尺寸 | 下移    | 屏幕间距 | (空)   |
+ */
+private val TOOL_GRID_PORTRAIT: Array<Array<ToolCell?>> = arrayOf(
+    arrayOf(CELL_HEIGHT_100, CELL_GAP_PLUS, null, null),
+    arrayOf(CELL_HEIGHT_50, CELL_ALIGN_TOP, CELL_GAP_MINUS, null),
+    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, CELL_ALIGN_RIGHT, null),
+    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_SCREEN_GAP, null),
 )
 
 /** Applies a gap delta to both screens (the gap is shared between them). */
@@ -215,16 +238,18 @@ private fun ZoomPanel(
     viewModel: BaseGameScreenViewModel,
     selectedScreen: ScreenLayoutManager.ScreenId,
     layoutState: ScreenLayoutManager.ScreenLayoutState,
-    viewPos: androidx.compose.ui.geometry.Rect,
+    displayWidthPx: Float,
+    displayHeightPx: Float,
     density: Float,
 ) {
     // Sequential left-to-right, top-to-bottom: [1x,2x] / [3x,4x] / [5x,…].
     val steps = if (isLandscape) intArrayOf(1, 2, 3, 4, 5, 6, 7, -1) else intArrayOf(1, 2, 3, 4, 5, -1)
     val currentScale = layoutState.transformOf(selectedScreen).scale
     val currentTransform = layoutState.transformOf(selectedScreen)
-    // Dynamic cap: the largest uniform scale that keeps the screen inside the usable area,
+    // Dynamic cap: the largest uniform scale that keeps the screen inside the full display,
     // given its current independent width/height scales. Stepped labels above this cap are hidden.
-    val maxScale = maxOnScreenScale(viewPos, density, currentTransform.scaleX, currentTransform.scaleY)
+    val maxScale =
+        maxOnScreenScale(displayWidthPx, displayHeightPx, density, currentTransform.scaleX, currentTransform.scaleY)
 
     Column(verticalArrangement = Arrangement.spacedBy(if (isLandscape) 5.dp else 6.dp)) {
         for (i in steps.indices step 2) {

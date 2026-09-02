@@ -4,6 +4,23 @@
 
 ---
 
+## v1.12 - 2026-09-01
+
+### NDS 编辑器：编辑时隐藏画面 + 虚线框样式改造 + 缩放语义修正（版本升至 1.19.3-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 258 / versionName 1.19.3 / suffix -v8b**:
+
+1. **编辑时隐藏游戏画面** — 进入「调整屏幕大小」后游戏画面 alpha 置 0（视图保持存活、不重建），画面上只剩虚线框作为唯一参照，直接对虚线框进行拖动/缩放/对齐。此前多轮"让画面跟随虚线框"的尝试因 core 渲染时序问题无法稳定同步，改为隐藏画面从根上消除不同步。
+2. **虚线框样式改造** — 虚线粗细减半（选中 1.5dp / 未选中 1dp）；上屏框填充 `#5D71E4`、下屏框填充 `#5DE45D`，均为 50% 透明度，先填充后描边。
+3. **缩放倍率语义修正（BUG）** — 此前 overlay 走 `aspectFitRect()` letterbox 分支导致 1x 不等于原始分辨率。删除该间接层：虚线框与缩放面板统一以 natural rect（256×192 逻辑像素 × density）为基准，**1x = NDS 屏幕原始分辨率 256×192**，2x/3x… 按倍数递增；`maxOnScreenScale` 上限从锚点矩形改为整屏尺寸（编辑时画面可放在屏幕任意位置）。
+4. **竖屏编辑模式按钮布局调整** — 仅竖屏：R1C4（高度100%）移到 R1C1（高度50%）正上方、R2C4（间距+）移到 R1C2（上移）正上方，其余格子保持原列位置，形成 4×4 网格；横屏布局不变。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — AndroidView 加 `.alpha(0f)` 编辑隐藏；overlay 删除 aspectFitRect 分支改用 natural rect；drawScreenFrame 加填充色+线宽减半；maxOnScreenScale 改全屏上限
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — ToolCell 重构（cell 自带 drawable）；新增 TOOL_GRID_PORTRAIT 4×4 布局；ZoomPanel 改收 displayWidthPx/displayHeightPx
+
+---
+
 ## v1.11 - 2026-09-01
 
 ### 修复：NDS 编辑器四个 BUG（版本升至 1.19.2-v8b）

@@ -51,6 +51,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
@@ -165,6 +166,11 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 modifier =
                     Modifier
                         .fillMaxSize()
+                        // Hide the game picture while the layout editor is open: the user edits
+                        // against the dashed frames only (the frozen frame would drift out of
+                        // sync with them). Alpha keeps the view alive so GLRetroView is not
+                        // recreated and fullScreenPosition stays valid.
+                        .alpha(if (editScreenLayoutShown.value) 0f else 1f)
                         .onGloballyPositioned { fullScreenPosition.value = it.boundsInRoot() },
                 factory = {
                     viewModel.createRetroView(localContext, lifecycle)
@@ -485,29 +491,33 @@ private const val NDS_SCREEN_HEIGHT = 192f
 
 /**
  * Computes the maximum uniform [ScreenLayoutManager.ScreenTransform.scale] that keeps the selected
- * screen fully inside the phone's usable area (the GLRetroView bounds).
+ * screen fully inside the phone display.
  *
- * The effective on-screen size is base(256×192 logical px × density) × scale × scaleX/scaleY, so the
- * cap depends on the current independent axis scales. A screen stays on-screen when BOTH its width
- * and height fit, hence the min() of the two per-axis limits.
+ * The editor hides the game picture and lets screens be placed anywhere on the display, so the cap
+ * is the full display size (not the letterboxed anchor). The effective on-screen size is
+ * base(256×192 logical px × density) × scale × scaleX/scaleY, so the cap depends on the current
+ * independent axis scales. A screen stays on-screen when BOTH its width and height fit, hence the
+ * min() of the two per-axis limits.
  *
- * @param viewPos the anchor/viewport rect in root px (the usable screen area)
+ * @param displayWidthPx full display width in physical px
+ * @param displayHeightPx full display height in physical px
  * @param density screen density (logical px → physical px)
  * @param scaleX current horizontal (width-axis) scale of the screen
  * @param scaleY current vertical (height-axis) scale of the screen
  */
 internal fun maxOnScreenScale(
-    viewPos: Rect,
+    displayWidthPx: Float,
+    displayHeightPx: Float,
     density: Float,
     scaleX: Float,
     scaleY: Float,
 ): Float {
     val baseWidth = NDS_SCREEN_WIDTH * density
     val baseHeight = NDS_SCREEN_HEIGHT * density
-    val maxByWidth = if (scaleX > 0f) viewPos.width / (baseWidth * scaleX) else Float.MAX_VALUE
-    val maxByHeight = if (scaleY > 0f) viewPos.height / (baseHeight * scaleY) else Float.MAX_VALUE
-    // Never below 1x so the screen is always at least its original size; clamp into [1, MAX_SCALE].
-    return minOf(maxByWidth, maxByHeight).coerceIn(1f, ScreenLayoutManager.MAX_SCALE)
+    val maxByWidth = if (scaleX > 0f) displayWidthPx / (baseWidth * scaleX) else Float.MAX_VALUE
+    val maxByHeight = if (scaleY > 0f) displayHeightPx / (baseHeight * scaleY) else Float.MAX_VALUE
+    // Allow shrinking below 1x on very small displays; never exceed MAX_SCALE.
+    return minOf(maxByWidth, maxByHeight).coerceAtMost(ScreenLayoutManager.MAX_SCALE)
 }
 
 /**
@@ -579,41 +589,6 @@ private fun normalizeToFullScreen(
 }
 
 /**
- * Aspect-fits content of [contentAspect] (width/height) inside [rect], returning the centered
- * fitted rect. This mirrors the native `VideoLayout::updateForegroundQuad` letterboxing so the
- * editor's dashed frames line up exactly with what is actually rendered on screen.
- */
-private fun aspectFitRect(rect: Rect, contentAspect: Float): Rect {
-    val rectAspect = if (rect.height > 0f) rect.width / rect.height else 0f
-    if (rectAspect <= 0f || contentAspect <= 0f) return rect
-    val fittedWidth: Float
-    val fittedHeight: Float
-    if (contentAspect > rectAspect) {
-        // Content is relatively taller → limited by the width, shrink height.
-        fittedWidth = rect.width
-        fittedHeight = rect.width / contentAspect
-    } else {
-        // Content is relatively wider → limited by the height, shrink width.
-        fittedWidth = rect.height * contentAspect
-        fittedHeight = rect.height
-    }
-    val cx = (rect.left + rect.right) / 2f
-    val cy = (rect.top + rect.bottom) / 2f
-    return Rect(
-        left = cx - fittedWidth / 2f,
-        top = cy - fittedHeight / 2f,
-        right = cx + fittedWidth / 2f,
-        bottom = cy + fittedHeight / 2f,
-    )
-}
-
-/** Full-frame (256×384, both screens stacked) content aspect — default layout. */
-private val NDS_FULL_FRAME_ASPECT = NDS_SCREEN_WIDTH / (NDS_SCREEN_HEIGHT * 2f)
-
-/** Single-screen (256×192) content aspect — custom/split layout per screen. */
-private val NDS_SCREEN_ASPECT = NDS_SCREEN_WIDTH / NDS_SCREEN_HEIGHT
-
-/**
  * Full-screen editor overlay for the NDS dual-screen layout customizer.
  * Shows a dashed frame per screen; tap a frame to select it, drag to move, pinch to zoom.
  * The bottom card mirrors the selection and offers sliders plus profile management.
@@ -637,30 +612,12 @@ private fun ScreenLayoutEditorOverlay(
         // Natural rects are needed both for display and for the align/center tools.
         val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, density)
 
-        // The dashed frames MUST match what is actually rendered:
-        //  - Default layout → single viewport: the whole 256×384 frame is aspect-fit into
-        //    viewPos; each screen is one half of that fitted quad.
-        //  - Custom layout → split viewport: each screen rect is aspect-fit to the single-
-        //    screen aspect (256/192), exactly like the native updateForegroundQuad letterboxing
-        //    where contentAspect = fullFrameAspect * 2 (= 256/384 * 2 = 256/192).
-        val applyCustomLayout = viewModel.isNdsSystem() && !layoutState.isDefault
-        val topRect: Rect
-        val bottomRect: Rect
-        if (applyCustomLayout) {
-            topRect = aspectFitRect(
-                applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f),
-                NDS_SCREEN_ASPECT,
-            )
-            bottomRect = aspectFitRect(
-                applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f),
-                NDS_SCREEN_ASPECT,
-            )
-        } else {
-            val fittedFull = aspectFitRect(viewPos, NDS_FULL_FRAME_ASPECT)
-            val midY = (fittedFull.top + fittedFull.bottom) / 2f
-            topRect = Rect(fittedFull.left, fittedFull.top, fittedFull.right, midY)
-            bottomRect = Rect(fittedFull.left, midY, fittedFull.right, fittedFull.bottom)
-        }
+        // Dashed frames are drawn from the same natural-rect math as the zoom semantics:
+        // 1x = one NDS screen at its original resolution (256×192 logical px), centered and
+        // stacked on the anchor. The game picture is hidden while editing, so the frames are
+        // the single source of truth — no letterbox/aspect-fit indirection that could drift.
+        val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f)
+        val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f)
 
         // Stable references for the pointer handlers: keying pointerInput on rects/layoutState
         // (which change every frame while dragging) restarts the gesture detector on each
@@ -691,11 +648,10 @@ private fun ScreenLayoutEditorOverlay(
                     }
                     .pointerInput(Unit) {
                         detectTransformGestures { _, pan, zoom, _ ->
-                            val vp = viewPosLatest.value ?: return@detectTransformGestures
                             val selected = selectedScreen.value
                             val current = layoutStateLatest.value.transformOf(selected)
                             val maxScale =
-                                maxOnScreenScale(vp, density, current.scaleX, current.scaleY)
+                                maxOnScreenScale(screenWidthPx, screenHeightPx, density, current.scaleX, current.scaleY)
                             viewModel.updateScreenLayoutTransform(
                                 selected,
                                 current.offsetX + pan.x,
@@ -713,11 +669,13 @@ private fun ScreenLayoutEditorOverlay(
                     topRect,
                     fullPos,
                     selected = selectedScreen.value == ScreenLayoutManager.ScreenId.TOP,
+                    fillColor = NDS_FRAME_FILL_TOP,
                 )
                 drawScreenFrame(
                     bottomRect,
                     fullPos,
                     selected = selectedScreen.value == ScreenLayoutManager.ScreenId.BOTTOM,
+                    fillColor = NDS_FRAME_FILL_BOTTOM,
                 )
             }
         }
@@ -753,7 +711,8 @@ private fun ScreenLayoutEditorOverlay(
                     selectedScreen = selectedScreen.value,
                     onScreenSelected = { selectedScreen.value = it },
                     isLandscape = isLandscape,
-                    viewPos = viewPos,
+                    displayWidthPx = screenWidthPx,
+                    displayHeightPx = screenHeightPx,
                     density = density,
                     onAlignToEdge = alignToEdge,
                     onClose = { toolboxVisible.value = false },
@@ -771,18 +730,33 @@ private fun ScreenLayoutEditorOverlay(
     }
 }
 
+/** Top-screen frame fill — design spec: #5D71E4 at 50% opacity. */
+private val NDS_FRAME_FILL_TOP = Color(0x805D71E4)
+
+/** Bottom-screen frame fill — design spec: #5DE45D at 50% opacity. */
+private val NDS_FRAME_FILL_BOTTOM = Color(0x805DE45D)
+
+/**
+ * Draws one dashed editor frame. Line thickness is halved vs the old editor (1.5dp/1dp),
+ * and each screen gets its own semi-transparent fill so top/bottom are distinguishable at a
+ * glance while editing without the game picture.
+ */
 private fun DrawScope.drawScreenFrame(
     rect: Rect,
     fullPos: Rect,
     selected: Boolean,
+    fillColor: Color,
 ) {
+    val topLeft = Offset(rect.left - fullPos.left, rect.top - fullPos.top)
+    val size = Size(rect.width, rect.height)
+    drawRect(color = fillColor, topLeft = topLeft, size = size)
     drawRect(
         color = if (selected) Color.White.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.4f),
-        topLeft = Offset(rect.left - fullPos.left, rect.top - fullPos.top),
-        size = Size(rect.width, rect.height),
+        topLeft = topLeft,
+        size = size,
         style =
             Stroke(
-                width = (if (selected) 3.dp else 2.dp).toPx(),
+                width = (if (selected) 1.5.dp else 1.dp).toPx(),
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 14f)),
             ),
     )
