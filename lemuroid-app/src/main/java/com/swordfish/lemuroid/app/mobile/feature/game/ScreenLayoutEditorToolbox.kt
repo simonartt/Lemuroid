@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,7 +60,7 @@ fun ScreenLayoutEditorToolbox(
         modifier = modifier,
         shape = RoundedCornerShape(8.dp),
         color = Color(0xCC1C1C20),
-        shadowElevation = 8.dp,
+        shadowElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier.padding(6.dp),
@@ -68,7 +69,19 @@ fun ScreenLayoutEditorToolbox(
         ) {
             // Tool grid (left) — icons are the design's own SVG tiles.
             // Portrait mode uses a 4×4 arrangement with R1C4/R2C4 promoted to the top row.
-            val grid = if (isLandscape) TOOL_GRID_LANDSCAPE else TOOL_GRID_PORTRAIT
+            // The two width-percent cells need runtime geometry, so they're built here and
+            // injected into the grid layout (remembered on the geometry values).
+            val width100 = remember(displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx) {
+                ToolCell("宽度 100%", R.drawable.nds_tile_r1c2) { vm, s, _ ->
+                    setWidthPercent(vm, s, 1.0f, displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx)
+                }
+            }
+            val width50 = remember(displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx) {
+                ToolCell("宽度 50%", R.drawable.nds_tile_r2c3) { vm, s, _ ->
+                    setWidthPercent(vm, s, 0.5f, displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx)
+                }
+            }
+            val grid = if (isLandscape) toolGridLandscape(width100, width50) else toolGridPortrait(width100, width50)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (row in grid.indices) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -147,10 +160,6 @@ private val CELL_HEIGHT_50 = ToolCell(
     R.drawable.nds_tile_r1c1,
 ) { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_HALF) }
 
-private val CELL_ALIGN_TOP = ToolCell("上移", R.drawable.nds_tile_r1c2) { _, _, align ->
-    align(AlignEdge.TOP)
-}
-
 private val CELL_GAP_MINUS = ToolCell(
     "水平间距调节",
     R.drawable.nds_tile_r1c3,
@@ -167,10 +176,6 @@ private val CELL_ALIGN_LEFT = ToolCell("左移", R.drawable.nds_tile_r2c1) { _, 
 
 private val CELL_FREE_MOVE = ToolCell("自由移动", R.drawable.nds_tile_r2c2) { _, _, align ->
     align(AlignEdge.CENTER)
-}
-
-private val CELL_ALIGN_RIGHT = ToolCell("右移", R.drawable.nds_tile_r2c3) { _, _, align ->
-    align(AlignEdge.RIGHT)
 }
 
 private val CELL_GAP_PLUS = ToolCell(
@@ -198,9 +203,9 @@ private val CELL_SCREEN_GAP = ToolCell(
  * | R2C1 左移    | R2C2 自由移动 | R2C3 右移   | R2C4 间距+    |
  * | R3C1 原始尺寸 | R3C2 下移 | R3C3 屏幕间距  | (空位)        |
  */
-private val TOOL_GRID_LANDSCAPE: Array<Array<ToolCell?>> = arrayOf(
-    arrayOf(CELL_HEIGHT_50, CELL_ALIGN_TOP, CELL_GAP_MINUS, CELL_HEIGHT_100),
-    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, CELL_ALIGN_RIGHT, CELL_GAP_PLUS),
+private fun toolGridLandscape(width100: ToolCell, width50: ToolCell): Array<Array<ToolCell?>> = arrayOf(
+    arrayOf(CELL_HEIGHT_50, width100, CELL_GAP_MINUS, CELL_HEIGHT_100),
+    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, width50, CELL_GAP_PLUS),
     arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_SCREEN_GAP, null),
 )
 
@@ -217,10 +222,10 @@ private val TOOL_GRID_LANDSCAPE: Array<Array<ToolCell?>> = arrayOf(
  * | 左移     | 自由移动 | 右移        |
  * | 原始尺寸 | 下移    | 屏幕间距    |
  */
-private val TOOL_GRID_PORTRAIT: Array<Array<ToolCell?>> = arrayOf(
+private fun toolGridPortrait(width100: ToolCell, width50: ToolCell): Array<Array<ToolCell?>> = arrayOf(
     arrayOf(CELL_HEIGHT_100, CELL_GAP_PLUS, null),
-    arrayOf(CELL_HEIGHT_50, CELL_ALIGN_TOP, CELL_GAP_MINUS),
-    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, CELL_ALIGN_RIGHT),
+    arrayOf(CELL_HEIGHT_50, width100, CELL_GAP_MINUS),
+    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, width50),
     arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_SCREEN_GAP),
 )
 
@@ -234,6 +239,28 @@ private fun nudgeGap(
     val next = (current + delta).coerceAtLeast(0f)
     vm.setScreenLayoutGap(ScreenId.TOP, next)
     vm.setScreenLayoutGap(ScreenId.BOTTOM, next)
+}
+
+/**
+ * Sets the selected screen's rendered width to [percent] of the device screen width.
+ * Rendered width = naturalWidth × scale, so the required uniform scale is
+ * percent × displayWidth / naturalWidth. Uniform scale keeps the 4:3 ratio intact.
+ */
+private fun setWidthPercent(
+    vm: BaseGameScreenViewModel,
+    screen: ScreenId,
+    percent: Float,
+    displayWidthPx: Float,
+    naturalTopWidthPx: Float,
+    naturalBottomWidthPx: Float,
+) {
+    val naturalWidth = if (screen == ScreenId.TOP) naturalTopWidthPx else naturalBottomWidthPx
+    if (naturalWidth <= 0f || displayWidthPx <= 0f) return
+    val targetScale = (percent * displayWidthPx / naturalWidth).coerceIn(
+        ScreenLayoutManager.MIN_SCALE,
+        ScreenLayoutManager.MAX_SCALE,
+    )
+    vm.setScreenLayoutScale(screen, targetScale)
 }
 
 /** Zoom panel: stepped uniform scale of the selected screen. */

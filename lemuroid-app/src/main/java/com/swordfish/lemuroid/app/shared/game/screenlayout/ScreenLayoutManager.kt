@@ -312,7 +312,7 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
     companion object {
         private const val PREF_KEY = "nds_screen_layout_settings"
 
-        const val MIN_SCALE = 0.5f
+        const val MIN_SCALE = 0.15f
         // Raised from 2.0 to support the zoom panel's 1x..7x stepped scale in the new editor UI.
         const val MAX_SCALE = 7.0f
         const val DEFAULT_SCALE = 1.0f

@@ -4,6 +4,24 @@
 
 ---
 
+## v1.15 - 2026-09-01
+
+### NDS 编辑器：倍率按钮互斥 + 全屏可拖 + 宽度百分比工具 + 去工具箱阴影（版本升至 1.19.6-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 261 / versionName 1.19.6 / suffix -v8b**:
+
+1. **倍率按钮不再同时激活（BUG）** — 竖屏 1080px 手机上 `baseScale = 256/1080 ≈ 0.237`，点 1x→0.237、2x→0.474 都低于旧的 `MIN_SCALE=0.5f`，两者都被钳到 0.5 导致 1x/2x 按钮同时高亮。现把 `ScreenLayoutManager.MIN_SCALE` 从 `0.5f` 降到 `0.15f`，各档位值互不重叠、按下哪个就只高亮哪个。
+2. **虚线框全屏任意位置可拖动（BUG）** — overlay 此前是两个同级 full-screen Box：第一个装 pointer handlers + Canvas，第二个装工具箱+底部栏；后者盖在前者上，空区域的触摸被它拦截后向上传播、永远到不了第一个 Box 的手势，导致手指必须落在虚线框内才能拖。现**合并为单个 full-screen Box**，pointer handlers 挂在容器上（拖动全屏任意位置生效），工具箱与底部栏作为子节点，其自身的 clickable 会先消费点击、不干扰变换手势。
+3. **R1C2/R2C3 改为宽度百分比工具（功能）** — R1C2（nds_tile_r1c2，左右箭头+横条）从"上移"改为**宽度 100%**：把选中屏渲染宽度设为设备屏幕宽；R2C3（nds_tile_r2c3，右箭头+竖条）从"右移"改为**宽度 50%**：设为设备屏幕宽的 50%。实现为 `setWidthPercent`：`targetScale = percent × displayWidth / naturalWidth`（统一缩放保持 4:3）。因该逻辑需要运行时几何参数，这两个 cell 在 composable 内用 `remember(几何值)` 构建并注入 grid（grid 改为工厂函数 `toolGridLandscape/Portrait(width100, width50)`），其余 cell 仍为 top-level 常量。
+4. **去掉工具箱底部黑色装饰框（优化）** — 工具箱 Surface 的 `shadowElevation=8.dp` 在 Android 上 elevation 阴影偏底部，看起来像工具箱下沿多了一条黑框。现改为 `shadowElevation=0.dp`，保留半透明深色底板与圆角。
+
+**修改文件**:
+- `lemuroid-app/.../shared/game/screenlayout/ScreenLayoutManager.kt` — `MIN_SCALE` 0.5f → 0.15f
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — overlay 两个 full-screen Box 合并为一个（pointer handlers 挂容器，工具箱/底部栏为子节点）
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — R1C2/R2C3 cell 改为宽度 100%/50%；新增 `setWidthPercent()`；grid 数组改工厂函数并注入运行时构建的 width cell；工具箱 Surface `shadowElevation` 8dp→0dp
+
+---
+
 ## v1.14 - 2026-09-01
 
 ### NDS 编辑器：默认全宽 fit + 横屏左右并排 + 倍率按钮原生基准（版本升至 1.19.5-v8b）

@@ -655,6 +655,28 @@ private fun ScreenLayoutEditorOverlay(
         val layoutStateLatest = rememberUpdatedState(layoutState)
         val viewPosLatest = rememberUpdatedState(viewPos)
 
+        // Align/center tools need geometry, so compute the target offset here and push it down.
+        val alignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit = { screen, edge ->
+            val natural = if (screen == ScreenLayoutManager.ScreenId.TOP) naturalTop else naturalBottom
+            val transform = layoutState.transformOf(screen)
+            val halfW = natural.width * transform.scale * transform.scaleX / 2f
+            val halfH = natural.height * transform.scale * transform.scaleY / 2f
+            val cx = natural.center.x
+            val cy = natural.center.y
+            val (ox, oy) =
+                when (edge) {
+                    AlignEdge.TOP -> transform.offsetX to (viewPos.top - (cy - halfH))
+                    AlignEdge.BOTTOM -> transform.offsetX to (viewPos.bottom - (cy + halfH))
+                    AlignEdge.LEFT -> (viewPos.left - (cx - halfW)) to transform.offsetY
+                    AlignEdge.RIGHT -> (viewPos.right - (cx + halfW)) to transform.offsetY
+                    AlignEdge.CENTER -> 0f to 0f
+                }
+            viewModel.setScreenLayoutOffset(screen, ox, oy)
+        }
+
+        // Single full-screen Box: pointer handlers on the container so drags work ANYWHERE on
+        // screen (not just inside the dashed frames). Toolbox and bottom bar are children;
+        // their own clickable modifiers consume taps before they reach the transform gestures.
         Box(
             modifier =
                 Modifier
@@ -702,30 +724,7 @@ private fun ScreenLayoutEditorOverlay(
                     fillColor = NDS_FRAME_FILL_BOTTOM,
                 )
             }
-        }
 
-        // Align/center tools need geometry, so compute the target offset here and push it down.
-        val alignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit = { screen, edge ->
-            val natural = if (screen == ScreenLayoutManager.ScreenId.TOP) naturalTop else naturalBottom
-            val transform = layoutState.transformOf(screen)
-            val halfW = natural.width * transform.scale * transform.scaleX / 2f
-            val halfH = natural.height * transform.scale * transform.scaleY / 2f
-            val cx = natural.center.x
-            val cy = natural.center.y
-            val (ox, oy) =
-                when (edge) {
-                    AlignEdge.TOP -> transform.offsetX to (viewPos.top - (cy - halfH))
-                    AlignEdge.BOTTOM -> transform.offsetX to (viewPos.bottom - (cy + halfH))
-                    AlignEdge.LEFT -> (viewPos.left - (cx - halfW)) to transform.offsetY
-                    AlignEdge.RIGHT -> (viewPos.right - (cx + halfW)) to transform.offsetY
-                    AlignEdge.CENTER -> 0f to 0f
-                }
-            viewModel.setScreenLayoutOffset(screen, ox, oy)
-        }
-
-        Box(
-            modifier = Modifier.fillMaxSize(),
-        ) {
             if (toolboxVisible.value) {
                 ScreenLayoutEditorToolbox(
                     modifier = Modifier.align(Alignment.Center),
