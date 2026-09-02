@@ -4,6 +4,18 @@
 
 ---
 
+## v1.9 - 2026-09-02
+
+### 修复：NDS 屏幕编辑器三个问题（版本升至 1.19.0-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 255 / versionName 1.19.0 / suffix -v8b**:
+
+1. **进入编辑模式时游戏不暂停、画面不冻结** — 根因是生命周期竞态：游戏菜单为独立 Activity，返回时 `onActivityResult()`（执行 `pauseEmulation()`）先于 `onResume()` 触发，后者经 `RenderLifecycleObserver.resume()` 把 `isEmulationReady` 重新置 true 导致自动解冻。修复：`GLRetroView.kt` 新增 `isEditorMode` 标志位，编辑期间跳过 ON_RESUME 的自动 resume；显式 `resumeEmulation()` 时才清除标志恢复。
+2. **虚线框与实际画面位置/大小不匹配** — overlay 原先按固定自然尺寸画框，未复刻 native `updateForegroundQuad` 的 aspect-fit letterbox。修复：`MobileGameScreen.kt` 新增 `aspectFitRect()`，默认布局（整帧 256×384 fit）与自定义布局（每屏单独 fit）分别计算框的几何。
+3. **底部菜单栏被隐藏** — `ScreenLayoutBottomBar` 原在工具箱 else 分支内，现移出使其始终可见；仅中间「工具箱」按钮随面板开合切换。
+
+---
+
 ## v1.8 - 2026-09-01
 
 ### 新增：NDS 屏幕编辑器全新 UI（浮动词条工具箱）+ 应用更名
