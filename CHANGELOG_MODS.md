@@ -4,6 +4,22 @@
 
 ---
 
+## v1.14 - 2026-09-01
+
+### NDS 编辑器：默认全宽 fit + 横屏左右并排 + 倍率按钮原生基准（版本升至 1.19.5-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 260 / versionName 1.19.5 / suffix -v8b**:
+
+1. **默认打开 = 双屏整体 fit 游戏区（设计纠正）** — v1.19.4 把 natural rect 定为固定 256×192 device px，导致默认打开时每块屏只有手机屏幕宽度的 ~1/4。现改为：**竖屏**每块屏宽 = 锚点全宽（手机全宽）、高 = 0.75×宽（保持 4:3），上下叠放、高度不够时等比缩；**横屏**双屏左右并排，每块屏高 = 锚点全高、宽 = 1.333×高，宽度不够时等比缩。运行时画面与编辑器虚线框仍共用同一套几何（v1.19.4 的 BUG1 修复保留）。
+2. **横屏双屏左右并排** — `applyScreenLayoutTransform` 的 gap 轴随方向切换：竖屏沿 Y（上屏上移/下屏下移），横屏沿 X（左屏左移/右屏右移）；对齐工具（上下左右/回中）逻辑不变，天然适配两种排布。
+3. **倍率按钮改为原生分辨率基准 + 默认不高亮** — 此前 scale=1.0 恰好等于 1x 档位导致编辑器打开时 1x 按钮默认高亮。新语义：**Nx = N × 256×192 device px**（按 `nativeResolutionScale = 256 / naturalWidth` 映射到 scale 值，如 1080px 宽手机上 1x ≈ scale 0.237），默认 fit 观感（scale=1.0）不等于任何整数档位，**倍率按钮默认全部不激活、手动按下才高亮**；点 1x 缩回 256px 原生小图。`maxOnScreenScale` 动态上限删除（默认已是全宽，zoom-in 必须允许超过 fit），统一用 MIN_SCALE..MAX_SCALE 区间。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `computeNaturalScreenRects(anchor, isLandscape)` 重写为锚点 fit（竖屏全宽叠放/横屏并排）；新增 `nativeResolutionScale()`；删除 `maxOnScreenScale()`；`applyScreenLayoutTransform` gap 轴随方向切换
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — ZoomPanel 档位改为原生基准映射（Nx → N×256px），默认态无高亮
+
+---
+
 ## v1.13 - 2026-09-01
 
 ### NDS 编辑器：运行时与虚线框同源 + 1x 对应原始分辨率 + 竖屏工具箱紧凑居中（版本升至 1.19.4-v8b）

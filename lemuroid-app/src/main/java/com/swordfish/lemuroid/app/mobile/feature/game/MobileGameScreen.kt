@@ -187,14 +187,17 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 // transform is the identity so unconfigured behavior is unchanged.
                 // NDS always renders in split-viewport mode — even at default values — so the
                 // runtime picture and the editor's dashed frames share one geometry: each screen
-                // sits on its natural rect (256×192 device px at 1x), centered and stacked on the
-                // anchor. There is no aspect-fit single-viewport fallback for NDS anymore, which
-                // is what made the editor frames drift from the actual runtime size.
+                // sits on its natural rect (the anchor-fit size, full phone width in portrait /
+                // full height side-by-side in landscape). There is no aspect-fit single-viewport
+                // fallback for NDS anymore, which is what made the editor frames drift from the
+                // actual runtime size.
                 val applySplitLayout = viewModel.isNdsSystem() && screenLayout != null
                 if (applySplitLayout) {
-                    val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos)
-                    val topRect = applyScreenLayoutTransform(naturalTop, screenLayout!!.topScreen, gapSign = -1f)
-                    val bottomRect = applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen, gapSign = +1f)
+                    val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, isLandscape)
+                    val topRect =
+                        applyScreenLayoutTransform(naturalTop, screenLayout!!.topScreen, gapSign = -1f, isLandscape)
+                    val bottomRect =
+                        applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen, gapSign = +1f, isLandscape)
                     val topViewport = normalizeToFullScreen(topRect, fullPos)
                     val bottomViewport = normalizeToFullScreen(bottomRect, fullPos)
                     Timber.d("Setting split viewport: top=$topViewport bottom=$bottomViewport")
@@ -486,79 +489,90 @@ private fun MenuEditTouchControlRow(
     }
 }
 
-/** NDS single-screen resolution in logical pixels. */
+/** NDS single-screen resolution in native pixels — the 1x zoom button's target size. */
 private const val NDS_SCREEN_WIDTH = 256f
 private const val NDS_SCREEN_HEIGHT = 192f
 
 /**
- * Computes the maximum uniform [ScreenLayoutManager.ScreenTransform.scale] that keeps the selected
- * screen fully inside the phone display.
+ * Computes the natural (untouched) rects of the top and bottom screens at scale=1.0 —
+ * i.e. the DEFAULT look: both screens together fit the game-view anchor.
  *
- * The editor hides the game picture and lets screens be placed anywhere on the display, so the cap
- * is the full display size (not the letterboxed anchor). The effective on-screen size is
- * base(256×192 device px) × scale × scaleX/scaleY, so the cap depends on the current independent
- * axis scales. A screen stays on-screen when BOTH its width and height fit, hence the min() of
- * the two per-axis limits.
+ * Portrait: the pair stacks vertically, each screen as wide as the anchor (the phone's full
+ * width), height = 0.75 × width to keep the 4:3 screen ratio; if that overflows the anchor
+ * height the pair scales down proportionally. Landscape: the pair sits side by side, each
+ * screen as tall as the anchor (full height), width = 1.333 × height, scaling down if it
+ * overflows the anchor width.
  *
- * @param displayWidthPx full display width in physical px
- * @param displayHeightPx full display height in physical px
- * @param scaleX current horizontal (width-axis) scale of the screen
- * @param scaleY current vertical (height-axis) scale of the screen
+ * The zoom panel's 1x..7x are then NATIVE-RESOLUTION multiples: pressing Nx sets scale to
+ * nativeWidth / naturalWidth (e.g. ≈0.23 on a 1080px phone), so 1x renders exactly 256×192
+ * device px. The default (scale=1.0) never equals an integer step, which is why no zoom
+ * button is highlighted until one is pressed.
  */
-internal fun maxOnScreenScale(
-    displayWidthPx: Float,
-    displayHeightPx: Float,
-    scaleX: Float,
-    scaleY: Float,
-): Float {
-    val baseWidth = NDS_SCREEN_WIDTH
-    val baseHeight = NDS_SCREEN_HEIGHT
-    val maxByWidth = if (scaleX > 0f) displayWidthPx / (baseWidth * scaleX) else Float.MAX_VALUE
-    val maxByHeight = if (scaleY > 0f) displayHeightPx / (baseHeight * scaleY) else Float.MAX_VALUE
-    // Allow shrinking below 1x on very small displays; never exceed MAX_SCALE.
-    return minOf(maxByWidth, maxByHeight).coerceAtMost(ScreenLayoutManager.MAX_SCALE)
+private fun computeNaturalScreenRects(anchor: Rect, isLandscape: Boolean): Pair<Rect, Rect> {
+    val anchorW = anchor.width
+    val anchorH = anchor.height
+    if (anchorW <= 0f || anchorH <= 0f) return anchor to anchor
+
+    // Per-screen size that fits the pair inside the anchor.
+    var w: Float
+    var h: Float
+    if (isLandscape) {
+        // Side by side: each screen full anchor height, width from the 4:3 ratio;
+        // the pair is twice as wide, so it scales down when that overflows.
+        h = anchorH
+        w = anchorH * NDS_SCREEN_WIDTH / NDS_SCREEN_HEIGHT
+        val pairW = 2f * w
+        if (pairW > anchorW) {
+            val k = anchorW / pairW
+            w *= k
+            h *= k
+        }
+    } else {
+        // Stacked: each screen full anchor width, height from the 4:3 ratio;
+        // the pair is 1.5× the single height, so it scales down when that overflows.
+        w = anchorW
+        h = anchorW * NDS_SCREEN_HEIGHT / NDS_SCREEN_WIDTH
+        val pairH = 2f * h
+        if (pairH > anchorH) {
+            val k = anchorH / pairH
+            w *= k
+            h *= k
+        }
+    }
+
+    val cx = anchor.center.x
+    val cy = anchor.center.y
+    return if (isLandscape) {
+        // Top screen on the left, bottom screen on the right, flush at the center line.
+        Rect(cx - w, cy - h / 2f, cx, cy + h / 2f) to
+            Rect(cx, cy - h / 2f, cx + w, cy + h / 2f)
+    } else {
+        // Top screen on top, bottom screen below, flush at the center line.
+        Rect(cx - w / 2f, cy - h, cx + w / 2f, cy) to
+            Rect(cx - w / 2f, cy, cx + w / 2f, cy + h)
+    }
 }
 
 /**
- * Computes the natural (untouched) rects of the top and bottom screens.
- *
- * The base size is the NDS original resolution in DEVICE pixels: 256×192 px on screen at 1x,
- * one emulator pixel per device pixel. Each screen is centered horizontally on the anchor and
- * stacked vertically around the anchor's vertical center, flush against each other. The zoom
- * panel's 1x..7x then multiplies this base size (see [applyScreenLayoutTransform]).
- *
- * NOTE: no density scaling — that was the bug that made "1x" render larger than the NDS
- * original resolution and drift the editor frames away from the runtime picture.
+ * The uniform scale that renders one screen at its NDS native resolution (256×192 device px),
+ * given the natural rect width produced by [computeNaturalScreenRects]. Used to map the zoom
+ * panel's Nx buttons onto [ScreenLayoutManager.ScreenTransform.scale] values: pressing Nx sets
+ * scale = N × this value, so 1x always means exactly 256 px wide regardless of device.
  */
-private fun computeNaturalScreenRects(anchor: Rect): Pair<Rect, Rect> {
-    val screenWidth = NDS_SCREEN_WIDTH
-    val screenHeight = NDS_SCREEN_HEIGHT
-    val centerX = (anchor.left + anchor.right) / 2f
-    val centerY = (anchor.top + anchor.bottom) / 2f
-    val left = centerX - screenWidth / 2f
-    val right = centerX + screenWidth / 2f
-    val top =
-        Rect(
-            left = left,
-            top = centerY - screenHeight,
-            right = right,
-            bottom = centerY,
-        )
-    val bottom =
-        Rect(
-            left = left,
-            top = centerY,
-            right = right,
-            bottom = centerY + screenHeight,
-        )
-    return top to bottom
+internal fun nativeResolutionScale(naturalWidthPx: Float): Float {
+    return if (naturalWidthPx > 0f) NDS_SCREEN_WIDTH / naturalWidthPx else 1f
 }
 
-/** Applies a per-screen transform (scale around own center + pixel translation + vertical gap). */
+/**
+ * Applies a per-screen transform (scale around own center + pixel translation + gap).
+ * The gap runs along the stack axis: vertical in portrait (top screen up, bottom down),
+ * horizontal in landscape (left screen left, right screen right).
+ */
 private fun applyScreenLayoutTransform(
     base: Rect,
     transform: ScreenLayoutManager.ScreenTransform,
     gapSign: Float = 0f,
+    isLandscape: Boolean = false,
 ): Rect {
     val centerX = (base.left + base.right) / 2f
     val centerY = (base.top + base.bottom) / 2f
@@ -566,15 +580,23 @@ private fun applyScreenLayoutTransform(
     val halfWidth = (base.right - base.left) * transform.scale * transform.scaleX / 2f
     // Effective height = uniform scale × vertical (height-axis) scale.
     val halfHeight = (base.bottom - base.top) * transform.scale * transform.scaleY / 2f
-    // gap pushes the screen along the vertical stack axis: top screen gapSign=-1 (up),
-    // bottom screen gapSign=+1 (down). This increases the spacing between the two screens.
-    val gapOffsetY = transform.gap * gapSign
-    return Rect(
-        left = centerX - halfWidth + transform.offsetX,
-        top = centerY - halfHeight + transform.offsetY + gapOffsetY,
-        right = centerX + halfWidth + transform.offsetX,
-        bottom = centerY + halfHeight + transform.offsetY + gapOffsetY,
-    )
+    return if (isLandscape) {
+        val gapOffsetX = transform.gap * gapSign
+        Rect(
+            left = centerX - halfWidth + transform.offsetX + gapOffsetX,
+            top = centerY - halfHeight + transform.offsetY,
+            right = centerX + halfWidth + transform.offsetX + gapOffsetX,
+            bottom = centerY + halfHeight + transform.offsetY,
+        )
+    } else {
+        val gapOffsetY = transform.gap * gapSign
+        Rect(
+            left = centerX - halfWidth + transform.offsetX,
+            top = centerY - halfHeight + transform.offsetY + gapOffsetY,
+            right = centerX + halfWidth + transform.offsetX,
+            bottom = centerY + halfHeight + transform.offsetY + gapOffsetY,
+        )
+    }
 }
 
 /** Normalizes a root-coordinate rect into the GLRetroView's 0..1 viewport space. */
@@ -610,15 +632,18 @@ private fun ScreenLayoutEditorOverlay(
     val toolboxVisible = remember { mutableStateOf(true) }
 
     if (fullPos != null && viewPos != null) {
+        val isLandscape = screenWidthPx > screenHeightPx
+
         // Natural rects are needed both for display and for the align/center tools.
-        val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos)
+        val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, isLandscape)
 
         // Dashed frames are drawn from the same natural-rect math as the zoom semantics:
-        // 1x = one NDS screen at its original resolution (256×192 logical px), centered and
-        // stacked on the anchor. The game picture is hidden while editing, so the frames are
-        // the single source of truth — no letterbox/aspect-fit indirection that could drift.
-        val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f)
-        val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f)
+        // scale=1.0 = the anchor-fit default (full phone width in portrait / full height
+        // side-by-side in landscape); 1x..7x map to native-resolution multiples via
+        // nativeResolutionScale(). The game picture is hidden while editing, so the frames
+        // are the single source of truth — no letterbox/aspect-fit indirection that could drift.
+        val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f, isLandscape)
+        val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f, isLandscape)
 
         // Stable references for the pointer handlers: keying pointerInput on rects/layoutState
         // (which change every frame while dragging) restarts the gesture detector on each
@@ -651,15 +676,13 @@ private fun ScreenLayoutEditorOverlay(
                         detectTransformGestures { _, pan, zoom, _ ->
                             val selected = selectedScreen.value
                             val current = layoutStateLatest.value.transformOf(selected)
-                            val maxScale =
-                                maxOnScreenScale(screenWidthPx, screenHeightPx, current.scaleX, current.scaleY)
                             viewModel.updateScreenLayoutTransform(
                                 selected,
                                 current.offsetX + pan.x,
                                 current.offsetY + pan.y,
                                 (current.scale * zoom).coerceIn(
                                     ScreenLayoutManager.MIN_SCALE,
-                                    maxScale,
+                                    ScreenLayoutManager.MAX_SCALE,
                                 ),
                             )
                         }
@@ -703,7 +726,6 @@ private fun ScreenLayoutEditorOverlay(
         Box(
             modifier = Modifier.fillMaxSize(),
         ) {
-            val isLandscape = screenWidthPx > screenHeightPx
             if (toolboxVisible.value) {
                 ScreenLayoutEditorToolbox(
                     modifier = Modifier.align(Alignment.Center),
@@ -714,6 +736,8 @@ private fun ScreenLayoutEditorOverlay(
                     isLandscape = isLandscape,
                     displayWidthPx = screenWidthPx,
                     displayHeightPx = screenHeightPx,
+                    naturalTopWidthPx = naturalTop.width,
+                    naturalBottomWidthPx = naturalBottom.width,
                     onAlignToEdge = alignToEdge,
                     onClose = { toolboxVisible.value = false },
                 )

@@ -50,6 +50,8 @@ fun ScreenLayoutEditorToolbox(
     isLandscape: Boolean,
     displayWidthPx: Float,
     displayHeightPx: Float,
+    naturalTopWidthPx: Float,
+    naturalBottomWidthPx: Float,
     onAlignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -89,6 +91,8 @@ fun ScreenLayoutEditorToolbox(
                 layoutState = layoutState,
                 displayWidthPx = displayWidthPx,
                 displayHeightPx = displayHeightPx,
+                naturalTopWidthPx = naturalTopWidthPx,
+                naturalBottomWidthPx = naturalBottomWidthPx,
             )
         }
     }
@@ -241,15 +245,20 @@ private fun ZoomPanel(
     layoutState: ScreenLayoutManager.ScreenLayoutState,
     displayWidthPx: Float,
     displayHeightPx: Float,
+    naturalTopWidthPx: Float,
+    naturalBottomWidthPx: Float,
 ) {
     // Sequential left-to-right, top-to-bottom: [1x,2x] / [3x,4x] / [5x,…].
     val steps = if (isLandscape) intArrayOf(1, 2, 3, 4, 5, 6, 7, -1) else intArrayOf(1, 2, 3, 4, 5, -1)
     val currentScale = layoutState.transformOf(selectedScreen).scale
-    val currentTransform = layoutState.transformOf(selectedScreen)
-    // Dynamic cap: the largest uniform scale that keeps the screen inside the full display,
-    // given its current independent width/height scales. Stepped labels above this cap are hidden.
-    val maxScale =
-        maxOnScreenScale(displayWidthPx, displayHeightPx, currentTransform.scaleX, currentTransform.scaleY)
+
+    // Zoom buttons are NATIVE-RESOLUTION multiples: Nx renders one screen at N × 256×192
+    // device px. The default look (scale=1.0) is the anchor-fit size, which on a typical phone
+    // is several times the native width — so scale=1.0 never equals an integer step and no
+    // button is highlighted until one is pressed.
+    val naturalWidth =
+        if (selectedScreen == ScreenId.TOP) naturalTopWidthPx else naturalBottomWidthPx
+    val baseScale = nativeResolutionScale(naturalWidth)
 
     Column(verticalArrangement = Arrangement.spacedBy(if (isLandscape) 5.dp else 6.dp)) {
         for (i in steps.indices step 2) {
@@ -262,12 +271,12 @@ private fun ZoomPanel(
                         Spacer(modifier = Modifier.size(if (isLandscape) 38.dp else 44.dp))
                         continue
                     }
-                    val stepFloat = step.toFloat()
-                    val clampedScale = stepFloat.coerceAtMost(maxScale)
+                    val targetScale = (step * baseScale).coerceIn(
+                        ScreenLayoutManager.MIN_SCALE,
+                        ScreenLayoutManager.MAX_SCALE,
+                    )
                     // Highlight only the button whose own value equals the current scale.
-                    // Comparing against clampedScale used to light up every button above the
-                    // cap at once (e.g. at 2x with a 1.5x cap, 3x/4x/5x all turned blue).
-                    val active = stepFloat <= maxScale && currentScale == stepFloat
+                    val active = currentScale == targetScale
                     Box(
                         modifier =
                             Modifier
@@ -281,7 +290,7 @@ private fun ZoomPanel(
                                     Color(0xFF35b5e8),
                                     RoundedCornerShape(4.dp),
                                 )
-                                .clickable { viewModel.setScreenLayoutScale(selectedScreen, clampedScale) },
+                                .clickable { viewModel.setScreenLayoutScale(selectedScreen, targetScale) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
