@@ -13,24 +13,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowForward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.OpenInFull
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swordfish.lemuroid.R
 import com.swordfish.lemuroid.app.shared.game.BaseGameScreenViewModel
 import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager
 import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager.ScreenId
@@ -40,7 +34,7 @@ enum class AlignEdge { TOP, BOTTOM, LEFT, RIGHT, CENTER }
 
 /**
  * Floating "tool strip" for the NDS dual-screen layout editor.
- * Replaces the old bottom-card editor. Centers a 4×3 tool grid plus a zoom panel.
+ * A 4×3 grid of design-faithful tile drawables (nds_tile_r1c1 … r3c3) plus a zoom panel.
  *
  * Design source: docs/UI-元素文档.md (Figma NDS-Screen-Editor).
  * All tools operate on the currently selected screen (tap a dashed frame to pick it).
@@ -69,7 +63,7 @@ fun ScreenLayoutEditorToolbox(
             horizontalArrangement = Arrangement.spacedBy(if (isLandscape) 8.dp else 10.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            // 4×3 tool grid (left)
+            // 4×3 tool grid (left) — icons are the design's own SVG tiles.
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (row in 0 until 3) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -79,7 +73,6 @@ fun ScreenLayoutEditorToolbox(
                                 col = col,
                                 viewModel = viewModel,
                                 selectedScreen = selectedScreen,
-                                onScreenSelected = onScreenSelected,
                                 onAlignToEdge = onAlignToEdge,
                             )
                         }
@@ -99,65 +92,64 @@ fun ScreenLayoutEditorToolbox(
     }
 }
 
-/** A single 64dp tool tile in the 4×3 grid. */
+/** A single 64dp tool tile in the 4×3 grid. Renders the design's own vector tile. */
 @Composable
 private fun ToolGridButton(
     row: Int,
     col: Int,
     viewModel: BaseGameScreenViewModel,
     selectedScreen: ScreenLayoutManager.ScreenId,
-    onScreenSelected: (ScreenLayoutManager.ScreenId) -> Unit,
     onAlignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit,
 ) {
     val cell = TOOL_GRID[row][col]
-    val enabled = cell != null
 
     Box(
         modifier =
             Modifier
                 .size(64.dp)
-                .background(Color.White, RoundedCornerShape(4.dp))
-                .border(2.dp, Color(0xFF48DAFF), RoundedCornerShape(4.dp))
-                .let { base ->
-                    if (enabled) {
-                        base.clickable {
-                            cell!!.action(viewModel, selectedScreen) { edge ->
+                .then(
+                    if (cell != null) {
+                        Modifier.clickable {
+                            cell.action(viewModel, selectedScreen) { edge ->
                                 onAlignToEdge(selectedScreen, edge)
                             }
                         }
                     } else {
-                        base
-                    }
-                },
+                        // R3C4: empty slot — keeps the 4×3 grid shape (design: visibility:hidden).
+                        Modifier
+                    },
+                ),
         contentAlignment = Alignment.Center,
     ) {
-        if (enabled) {
-            val spec = cell!!
-            if (spec.icon != null) {
-                Icon(
-                    imageVector = spec.icon,
-                    contentDescription = spec.label,
-                    tint = Color(0xFF202020),
-                    modifier = Modifier.size(36.dp),
-                )
-            } else {
-                Text(
-                    text = spec.label,
-                    color = Color(0xFF202020),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 13.sp,
-                )
-            }
+        if (cell != null) {
+            androidx.compose.foundation.Image(
+                painter = painterResource(id = tileDrawable(row, col)),
+                contentDescription = cell.label,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
 
-/** A tool grid cell definition; null = empty placeholder (R3C4). */
+/** Maps a grid position to the design's exported tile drawable (figma-export/tiles/RxCy.svg). */
+private fun tileDrawable(row: Int, col: Int): Int =
+    when {
+        row == 0 && col == 0 -> R.drawable.nds_tile_r1c1
+        row == 0 && col == 1 -> R.drawable.nds_tile_r1c2
+        row == 0 && col == 2 -> R.drawable.nds_tile_r1c3
+        row == 0 && col == 3 -> R.drawable.nds_tile_r1c4
+        row == 1 && col == 0 -> R.drawable.nds_tile_r2c1
+        row == 1 && col == 1 -> R.drawable.nds_tile_r2c2
+        row == 1 && col == 2 -> R.drawable.nds_tile_r2c3
+        row == 1 && col == 3 -> R.drawable.nds_tile_r2c4
+        row == 2 && col == 0 -> R.drawable.nds_tile_r3c1
+        row == 2 && col == 1 -> R.drawable.nds_tile_r3c2
+        else -> R.drawable.nds_tile_r3c3
+    }
+
+/** A tool grid cell definition. */
 private class ToolCell(
     val label: String,
-    val icon: ImageVector? = null,
     val action: (BaseGameScreenViewModel, ScreenId, (AlignEdge) -> Unit) -> Unit,
 )
 
@@ -167,41 +159,53 @@ private class ToolCell(
  * | cell | function                                        | data field  |
  * |------|-------------------------------------------------|-------------|
  * | R1C1 | height → 50% of default                        | scaleY = 0.5 |
- * | R1C2 | align top                                       | offset → top |
- * | R1C3 | width → 50% of default                         | scaleX = 0.5 |
+ * | R1C2 | align top (上移)                                | offset → top |
+ * | R1C3 | horizontal gap nudge (水平间距调节, −)          | gap -= delta |
  * | R1C4 | height → 100% of default                       | scaleY = 1.0 |
- * | R2C1 | align left                                      | offset → left|
- * | R2C2 | center (move to screen center)                  | offset = 0   |
- * | R2C3 | align right                                     | offset → right|
- * | R2C4 | width → 100% of default                        | scaleX = 1.0 |
+ * | R2C1 | align left (左移)                               | offset → left|
+ * | R2C2 | free move / re-center (自由移动)                | offset = 0   |
+ * | R2C3 | align right (右移)                              | offset → right|
+ * | R2C4 | gap nudge (间距调节, +)                          | gap += delta |
  * | R3C1 | original size (reset this screen)               | reset        |
- * | R3C2 | align bottom                                    | offset → bottom|
- * | R3C3 | screen gap (push the two screens apart)         | gap += delta |
- * | R3C4 | empty                                           | —            |
+ * | R3C2 | align bottom (下移)                             | offset → bottom|
+ * | R3C3 | screen gap (屏幕间距调节)                        | gap += delta |
+ * | R3C4 | empty placeholder                               | —            |
  */
 private val TOOL_GRID: Array<Array<ToolCell?>> = arrayOf(
-    // Row 1: 高度50% / 顶部对齐 / 宽度50% / 高度100%
+    // Row 1: 高度50% / 上移 / 水平间距调节 / 高度100%
     arrayOf(
-        ToolCell("高 50%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_HALF) },
-        ToolCell("顶部对齐", Icons.Filled.ArrowUpward) { _, _, align -> align(AlignEdge.TOP) },
-        ToolCell("宽 50%") { vm, s, _ -> vm.setScreenLayoutHorizontalScale(s, ScreenLayoutManager.HORIZONTAL_SCALE_HALF) },
-        ToolCell("高 100%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_FULL) },
+        ToolCell("纵向缩放 50%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_HALF) },
+        ToolCell("上移") { _, _, align -> align(AlignEdge.TOP) },
+        ToolCell("水平间距调节") { vm, s, _ -> nudgeGap(vm, s, -ScreenLayoutManager.GAP_DELTA) },
+        ToolCell("纵向缩放 100%") { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_FULL) },
     ),
-    // Row 2: 左对齐 / 居中 / 右对齐 / 宽度100%
+    // Row 2: 左移 / 自由移动 / 右移 / 间距调节
     arrayOf(
-        ToolCell("左对齐", Icons.Filled.ArrowBack) { _, _, align -> align(AlignEdge.LEFT) },
-        ToolCell("居中", Icons.Filled.OpenInFull) { _, _, align -> align(AlignEdge.CENTER) },
-        ToolCell("右对齐", Icons.Filled.ArrowForward) { _, _, align -> align(AlignEdge.RIGHT) },
-        ToolCell("宽 100%") { vm, s, _ -> vm.setScreenLayoutHorizontalScale(s, ScreenLayoutManager.HORIZONTAL_SCALE_FULL) },
+        ToolCell("左移") { _, _, align -> align(AlignEdge.LEFT) },
+        ToolCell("自由移动") { _, _, align -> align(AlignEdge.CENTER) },
+        ToolCell("右移") { _, _, align -> align(AlignEdge.RIGHT) },
+        ToolCell("间距调节 100%") { vm, s, _ -> nudgeGap(vm, s, +ScreenLayoutManager.GAP_DELTA) },
     ),
-    // Row 3: 原始尺寸 / 底部对齐 / 屏幕间距 / 空位
+    // Row 3: 原始尺寸 / 下移 / 屏幕间距 / 空位
     arrayOf(
-        ToolCell("还原") { vm, s, _ -> vm.resetScreenLayoutScreen(s) },
-        ToolCell("底部对齐", Icons.Filled.ArrowDownward) { _, _, align -> align(AlignEdge.BOTTOM) },
-        ToolCell("间距") { vm, s, _ -> vm.setScreenLayoutGap(s, vm.currentScreenLayoutState().transformOf(s).gap + ScreenLayoutManager.GAP_DELTA) },
-        null, // R3C4 empty slot
+        ToolCell("Original Size") { vm, s, _ -> vm.resetScreenLayoutScreen(s) },
+        ToolCell("下移") { _, _, align -> align(AlignEdge.BOTTOM) },
+        ToolCell("Screen Gap") { vm, s, _ -> nudgeGap(vm, s, +ScreenLayoutManager.GAP_DELTA) },
+        null, // R3C4 empty slot (visibility:hidden in the design)
     ),
 )
+
+/** Applies a gap delta to both screens (the gap is shared between them). */
+private fun nudgeGap(
+    vm: BaseGameScreenViewModel,
+    screen: ScreenId,
+    delta: Float,
+) {
+    val current = vm.currentScreenLayoutState().transformOf(screen).gap
+    val next = (current + delta).coerceAtLeast(0f)
+    vm.setScreenLayoutGap(ScreenId.TOP, next)
+    vm.setScreenLayoutGap(ScreenId.BOTTOM, next)
+}
 
 /** Zoom panel: stepped uniform scale of the selected screen. */
 @Composable
@@ -264,7 +268,8 @@ private fun ZoomPanel(
 }
 
 /**
- * Bottom action bar: 菜单 / 重设回默认 / 关闭工具箱 / 完成.
+ * Bottom action bar — design §5, exactly five items:
+ * 菜单 / 重设回默认 / 编辑全局布局(禁用) / 关闭工具箱 / 调整屏幕大小.
  */
 @Composable
 fun ScreenLayoutBottomBar(
@@ -286,8 +291,10 @@ fun ScreenLayoutBottomBar(
         ) {
             BottomBarItem("菜单", enabled = true) { viewModel.showGameMenu() }
             BottomBarItem("重设回默认", enabled = true) { viewModel.resetScreenLayoutToDefault() }
+            // Reserved global-layout entry — disabled per design (rgba(255,255,255,0.4)).
+            BottomBarItem("编辑全局布局", enabled = false) {}
             BottomBarItem("关闭工具箱", enabled = true) { onCloseToolbox() }
-            BottomBarItem("完成", enabled = true) { viewModel.toggleEditScreenLayout(false) }
+            BottomBarItem("调整屏幕大小", enabled = true) { viewModel.toggleEditScreenLayout(false) }
         }
     }
 }

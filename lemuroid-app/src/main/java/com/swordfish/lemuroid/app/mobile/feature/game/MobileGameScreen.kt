@@ -48,6 +48,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -61,7 +62,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -607,9 +607,12 @@ private fun aspectFitRect(rect: Rect, contentAspect: Float): Rect {
     )
 }
 
-/** Per-screen (256×192) content aspect — matches native `contentAspect = aspectRatio * 2`. */
-private val NDS_SCREEN_ASPECT = NDS_SCREEN_WIDTH / NDS_SCREEN_HEIGHT
-/** Full-frame (256×384, both screens stacked) content aspect used in default single-viewport mode. */
+/**
+ * Fallback full-frame (256×384, both screens stacked) content aspect. Used only until the
+ * real value reported by the loaded core is read via `GLRetroView.getAspectRatio()`; the
+ * per-screen aspect in custom mode is always that core-reported value × 2 (matching the
+ * native `contentAspect = aspectRatio * 2`), never a hardcoded ratio.
+ */
 private val NDS_FULL_FRAME_ASPECT = NDS_SCREEN_WIDTH / (NDS_SCREEN_HEIGHT * 2f)
 
 /**
@@ -628,45 +631,74 @@ private fun ScreenLayoutEditorOverlay(
     density: Float,
 ) {
     val selectedScreen = remember { mutableStateOf(ScreenLayoutManager.ScreenId.TOP) }
-    // Toolbox is collapsed by default; a centered button opens it.
-    val toolboxVisible = remember { mutableStateOf(false) }
+    // The floating toolbox is visible as soon as the editor opens; only "关闭工具箱"
+    // in the bottom bar hides it (design §7.5). No separate open button exists.
+    val toolboxVisible = remember { mutableStateOf(true) }
+
+    // The loaded core reports its own full-frame aspect ratio, and different NDS cores
+    // (melonDS vs desmume) can report different values — a hardcoded 256/384 is guaranteed
+    // to be off for at least one of them. Read the real value once when the editor opens so
+    // the dashed frames match the native renderer exactly; calling getAspectRatio() every
+    // frame while dragging would block on the GL thread each time and reintroduce stutter.
+    val coreAspect = remember { mutableStateOf(NDS_FULL_FRAME_ASPECT) }
+    LaunchedEffect(Unit) {
+        try {
+            val gameView = viewModel.retroGameView.retroGameViewFlow()
+            val aspect = gameView.getAspectRatio()
+            if (aspect.isFinite() && aspect > 0f) coreAspect.value = aspect
+        } catch (_: Exception) {
+            // Keep the hardcoded fallback — editor still works, frames may be slightly off.
+        }
+    }
 
     if (fullPos != null && viewPos != null) {
         // Natural rects are needed both for display and for the align/center tools.
         val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, density)
 
         // The dashed frames MUST match what is actually rendered:
-        //  - Default layout → single viewport: the whole NDS frame (256×384) is aspect-fit into
-        //    viewPos; each screen is one half of that fitted quad.
+        //  - Default layout → single viewport: the whole frame (coreAspect of width/height) is
+        //    aspect-fit into viewPos; each screen is one half of that fitted quad.
         //  - Custom layout → split viewport: each screen rect is aspect-fit to its per-screen
-        //    aspect (256×192), exactly like the native updateForegroundQuad letterboxing.
+        //    aspect, exactly like the native updateForegroundQuad letterboxing where
+        //    contentAspect = aspectRatio * 2 (aspectRatio being the core-reported full frame).
         val applyCustomLayout = viewModel.isNdsSystem() && !layoutState.isDefault
         val topRect: Rect
         val bottomRect: Rect
         if (applyCustomLayout) {
             topRect = aspectFitRect(
                 applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f),
-                NDS_SCREEN_ASPECT,
+                coreAspect.value * 2f,
             )
             bottomRect = aspectFitRect(
                 applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f),
-                NDS_SCREEN_ASPECT,
+                coreAspect.value * 2f,
             )
         } else {
-            val fittedFull = aspectFitRect(viewPos, NDS_FULL_FRAME_ASPECT)
+            val fittedFull = aspectFitRect(viewPos, coreAspect.value)
             val midY = (fittedFull.top + fittedFull.bottom) / 2f
             topRect = Rect(fittedFull.left, fittedFull.top, fittedFull.right, midY)
             bottomRect = Rect(fittedFull.left, midY, fittedFull.right, fittedFull.bottom)
         }
 
+        // Stable references for the pointer handlers: keying pointerInput on rects/layoutState
+        // (which change every frame while dragging) restarts the gesture detector on each
+        // recomposition and makes drags stutter one-frame-at-a-time. Instead the blocks are
+        // registered once and always read the latest values through these state holders.
+        val topRectLatest = rememberUpdatedState(topRect)
+        val bottomRectLatest = rememberUpdatedState(bottomRect)
+        val fullPosLatest = rememberUpdatedState(fullPos)
+        val layoutStateLatest = rememberUpdatedState(layoutState)
+        val viewPosLatest = rememberUpdatedState(viewPos)
+
         Box(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .pointerInput(topRect, bottomRect) {
+                    .pointerInput(Unit) {
                         detectTapGestures { tap ->
-                            val topLocal = topRect.translate(-fullPos.left, -fullPos.top)
-                            val bottomLocal = bottomRect.translate(-fullPos.left, -fullPos.top)
+                            val fp = fullPosLatest.value ?: return@detectTapGestures
+                            val topLocal = topRectLatest.value.translate(-fp.left, -fp.top)
+                            val bottomLocal = bottomRectLatest.value.translate(-fp.left, -fp.top)
                             selectedScreen.value =
                                 when {
                                     topLocal.contains(tap) -> ScreenLayoutManager.ScreenId.TOP
@@ -675,12 +707,13 @@ private fun ScreenLayoutEditorOverlay(
                                 }
                         }
                     }
-                    .pointerInput(layoutState, viewPos) {
+                    .pointerInput(Unit) {
                         detectTransformGestures { _, pan, zoom, _ ->
+                            val vp = viewPosLatest.value ?: return@detectTransformGestures
                             val selected = selectedScreen.value
-                            val current = layoutState.transformOf(selected)
+                            val current = layoutStateLatest.value.transformOf(selected)
                             val maxScale =
-                                maxOnScreenScale(viewPos, density, current.scaleX, current.scaleY)
+                                maxOnScreenScale(vp, density, current.scaleX, current.scaleY)
                             viewModel.updateScreenLayoutTransform(
                                 selected,
                                 current.offsetX + pan.x,
@@ -730,12 +763,7 @@ private fun ScreenLayoutEditorOverlay(
             modifier = Modifier.fillMaxSize(),
         ) {
             val isLandscape = screenWidthPx > screenHeightPx
-            if (!toolboxVisible.value) {
-                OpenToolboxButton(
-                    modifier = Modifier.align(Alignment.Center),
-                    onClick = { toolboxVisible.value = true },
-                )
-            } else {
+            if (toolboxVisible.value) {
                 ScreenLayoutEditorToolbox(
                     modifier = Modifier.align(Alignment.Center),
                     viewModel = viewModel,
@@ -755,32 +783,6 @@ private fun ScreenLayoutEditorOverlay(
                 viewModel = viewModel,
                 isLandscape = isLandscape,
                 onCloseToolbox = { toolboxVisible.value = false },
-            )
-        }
-    }
-}
-
-/** Centered button that opens the collapsed layout toolbox. */
-@Composable
-private fun OpenToolboxButton(
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Surface(
-        modifier = modifier.clickable(onClick = onClick),
-        shape = CircleShape,
-        color = Color(0xCC1C1C20),
-        shadowElevation = 8.dp,
-    ) {
-        Box(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "工具箱",
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
             )
         }
     }

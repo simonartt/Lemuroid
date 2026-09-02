@@ -4,6 +4,18 @@
 
 ---
 
+## v1.10 - 2026-09-01
+
+### 修复：NDS 编辑器工具箱 UI 还原 + 虚线框与渲染严格同源（版本升至 1.19.1-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 256 / versionName 1.19.1 / suffix -v8b**:
+
+1. **工具箱 UI 还原设计稿** — R1C1~R3C3 九个工具按钮改用设计稿原始 SVG 瓦片图标（新增 `nds_tile_r1c1`…`nds_tile_r3c3` 共 11 个 VectorDrawable），不再自绘近似图形；底部操作栏按设计稿还原为「关闭工具箱」等固定项，删除此前自创的居中「工具箱」打开按钮（面板打开即默认可见）。
+2. **虚线框与实际渲染严格同源** — 根因：overlay 硬编码 `256/384` 整帧宽高比，而原生 `videolayout.cpp` 用 core 报告的 `aspectRatio * 2`（melonDS 与 desmume 报告值不同），必然对某一个 core 错位。修复：新增 JNI 桥接 `LibretroDroid.getAspectRatio()`（C++ → Java native → `GLRetroView.getAspectRatio()`，在 emulation 线程同步读取），编辑器打开时读一次真实宽高比并缓存——自定义布局用 `coreAspect × 2`、默认布局用 `coreAspect`，与原生 letterbox 数学完全一致；读取失败时回退到 256/384 安全值。
+3. **拖动卡顿** — 指针手势检测器改用稳定 key（`pointerInput(Unit)` + `rememberUpdatedState`），避免每帧重组重启手势导致一帧一顿。
+
+---
+
 ## v1.9 - 2026-09-02
 
 ### 修复：NDS 屏幕编辑器三个问题（版本升至 1.19.0-v8b）
