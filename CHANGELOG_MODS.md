@@ -4,6 +4,22 @@
 
 ---
 
+## v1.13 - 2026-09-01
+
+### NDS 编辑器：运行时与虚线框同源 + 1x 对应原始分辨率 + 竖屏工具箱紧凑居中（版本升至 1.19.4-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 259 / versionName 1.19.4 / suffix -v8b**:
+
+1. **编辑虚线框与运行时屏幕同源（BUG）** — 此前 NDS 默认态走 core 的 aspect-fit 单 viewport（整帧 256×384 塞进锚点），而编辑器虚线框走 split viewport，两套几何不一致导致虚线框大小/位置对不上运行画面，且"重设回默认"的值也不对。现改为 **NDS 始终走 split-viewport 渲染**（含默认态）：每块屏落在自己的 natural rect 上、围绕锚点居中堆叠，运行时画面与编辑器虚线框共享同一套几何计算，三者（运行画面 / 虚线框 / 重置默认）天然一致。
+2. **1x 对应 256×192 原始分辨率（BUG）** — 此前 natural rect 用 `256 × density`（逻辑像素→物理像素，如 704~768px），导致点 1x 后虚线框远大于 256×192、后面大倍率按钮尺寸全错。现 **natural rect = 256×192 device px（不乘 density）**：1x = NDS 原生分辨率 1:1，一个模拟器像素对应一个设备像素；`maxOnScreenScale` 同步去掉 density 参数。
+3. **竖屏工具箱紧凑居中（BUG）** — R1C4/R2C4 上移后原横屏第 4 列全空，此前保留为空槽造成中间大间隙。现**直接删除该空列**，改为 3×4 紧凑布局：整体居中、与屏幕两边留均匀间距、与倍数放大面板保持既有间距。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — NDS 始终 split viewport（删除 aspect-fit fallback）；`computeNaturalScreenRects` / `maxOnScreenScale` 去掉 density（natural rect = 256×192 device px）；overlay/toolbox 签名清理 density
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — TOOL_GRID_PORTRAIT 改为 3 列紧凑布局（删除全空第 4 列）；composable/ZoomPanel 签名去掉 density
+
+---
+
 ## v1.12 - 2026-09-01
 
 ### NDS 编辑器：编辑时隐藏画面 + 虚线框样式改造 + 缩放语义修正（版本升至 1.19.3-v8b）

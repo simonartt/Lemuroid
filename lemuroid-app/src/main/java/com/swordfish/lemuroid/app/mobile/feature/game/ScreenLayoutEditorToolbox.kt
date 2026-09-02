@@ -50,7 +50,6 @@ fun ScreenLayoutEditorToolbox(
     isLandscape: Boolean,
     displayWidthPx: Float,
     displayHeightPx: Float,
-    density: Float,
     onAlignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -90,7 +89,6 @@ fun ScreenLayoutEditorToolbox(
                 layoutState = layoutState,
                 displayWidthPx = displayWidthPx,
                 displayHeightPx = displayHeightPx,
-                density = density,
             )
         }
     }
@@ -204,19 +202,22 @@ private val TOOL_GRID_LANDSCAPE: Array<Array<ToolCell?>> = arrayOf(
 
 /**
  * Portrait arrangement — same tools, re-arranged per design: R1C4 (高度100%) is placed
- * directly above R1C1 (高度50%), and R2C4 (间距+) directly above R1C2 (上移). All other
- * cells keep their original column positions:
+ * directly above R1C1 (高度50%), and R2C4 (间距+) directly above R1C2 (上移). Every other
+ * cell keeps its original column position from the landscape grid. The 4th landscape column
+ * (which becomes empty after the two promotions) is dropped entirely — NOT kept as empty
+ * slots — so the toolbox stays compact, centered on screen with even spacing to the zoom
+ * panel:
  *
- * | 高度100% | 间距+   | (空)   | (空)   |
- * | 高度50%  | 上移    | 水平间距−| (空)   |
- * | 左移     | 自由移动 | 右移    | (空)   |
- * | 原始尺寸 | 下移    | 屏幕间距 | (空)   |
+ * | 高度100% | 间距+   | (空)        |
+ * | 高度50%  | 上移    | 水平间距−   |
+ * | 左移     | 自由移动 | 右移        |
+ * | 原始尺寸 | 下移    | 屏幕间距    |
  */
 private val TOOL_GRID_PORTRAIT: Array<Array<ToolCell?>> = arrayOf(
-    arrayOf(CELL_HEIGHT_100, CELL_GAP_PLUS, null, null),
-    arrayOf(CELL_HEIGHT_50, CELL_ALIGN_TOP, CELL_GAP_MINUS, null),
-    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, CELL_ALIGN_RIGHT, null),
-    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_SCREEN_GAP, null),
+    arrayOf(CELL_HEIGHT_100, CELL_GAP_PLUS, null),
+    arrayOf(CELL_HEIGHT_50, CELL_ALIGN_TOP, CELL_GAP_MINUS),
+    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, CELL_ALIGN_RIGHT),
+    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_SCREEN_GAP),
 )
 
 /** Applies a gap delta to both screens (the gap is shared between them). */
@@ -240,7 +241,6 @@ private fun ZoomPanel(
     layoutState: ScreenLayoutManager.ScreenLayoutState,
     displayWidthPx: Float,
     displayHeightPx: Float,
-    density: Float,
 ) {
     // Sequential left-to-right, top-to-bottom: [1x,2x] / [3x,4x] / [5x,…].
     val steps = if (isLandscape) intArrayOf(1, 2, 3, 4, 5, 6, 7, -1) else intArrayOf(1, 2, 3, 4, 5, -1)
@@ -249,7 +249,7 @@ private fun ZoomPanel(
     // Dynamic cap: the largest uniform scale that keeps the screen inside the full display,
     // given its current independent width/height scales. Stepped labels above this cap are hidden.
     val maxScale =
-        maxOnScreenScale(displayWidthPx, displayHeightPx, density, currentTransform.scaleX, currentTransform.scaleY)
+        maxOnScreenScale(displayWidthPx, displayHeightPx, currentTransform.scaleX, currentTransform.scaleY)
 
     Column(verticalArrangement = Arrangement.spacedBy(if (isLandscape) 5.dp else 6.dp)) {
         for (i in steps.indices step 2) {
