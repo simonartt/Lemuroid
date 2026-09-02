@@ -32,7 +32,7 @@ import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager
 import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager.ScreenId
 
 /** Edge a screen can be aligned to, or CENTER for re-centering. */
-enum class AlignEdge { TOP, BOTTOM, LEFT, RIGHT, CENTER }
+enum class AlignEdge { TOP, BOTTOM, BOTTOM_DEVICE, LEFT, RIGHT, CENTER }
 
 /**
  * Floating "tool strip" for the NDS dual-screen layout editor.
@@ -84,7 +84,14 @@ fun ScreenLayoutEditorToolbox(
                     setWidthPercent(vm, s, 0.5f, displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx)
                 }
             }
-            val grid = if (isLandscape) toolGridLandscape(width100, width50) else toolGridPortrait(width100, width50)
+            // Portrait R4C2 (下移): align to the DEVICE screen bottom (fullPos.bottom), not the
+            // game-view anchor — see AlignEdge.BOTTOM_DEVICE in MobileGameScreen.alignToEdge.
+            val bottomDevice = remember {
+                ToolCell("底部对齐", R.drawable.nds_tile_r3c2) { _, _, align ->
+                    align(AlignEdge.BOTTOM_DEVICE)
+                }
+            }
+            val grid = if (isLandscape) toolGridLandscape(width100, width50) else toolGridPortrait(width100, width50, bottomDevice)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (row in grid.indices) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -194,22 +201,21 @@ private val CELL_ALIGN_BOTTOM = ToolCell("下移", R.drawable.nds_tile_r3c2) { _
     align(AlignEdge.BOTTOM)
 }
 
-private val CELL_SCREEN_GAP = ToolCell(
-    "Screen Gap",
-    R.drawable.nds_tile_r3c3,
-) { vm, s, _ -> nudgeGap(vm, s, +ScreenLayoutManager.GAP_DELTA) }
+private val CELL_ALIGN_RIGHT = ToolCell("右对齐", R.drawable.nds_tile_align_right) { _, _, align ->
+    align(AlignEdge.RIGHT)
+}
 
 /**
  * Landscape arrangement — the design's 4×3 grid:
  *
  * | R1C1 高度50% | R1C2 上移 | R1C3 水平间距− | R1C4 高度100% |
  * | R2C1 左移    | R2C2 自由移动 | R2C3 右移   | R2C4 间距+    |
- * | R3C1 原始尺寸 | R3C2 下移 | R3C3 屏幕间距  | (空位)        |
+ * | R3C1 原始尺寸 | R3C2 下移 | R3C3 右对齐   | (空位)        |
  */
 private fun toolGridLandscape(width100: ToolCell, width50: ToolCell): Array<Array<ToolCell?>> = arrayOf(
     arrayOf(CELL_HEIGHT_50, width100, CELL_GAP_MINUS, CELL_HEIGHT_100),
     arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, width50, CELL_GAP_PLUS),
-    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_SCREEN_GAP, null),
+    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_ALIGN_RIGHT, null),
 )
 
 /**
@@ -223,13 +229,17 @@ private fun toolGridLandscape(width100: ToolCell, width50: ToolCell): Array<Arra
  * | 高度100% | 间距+   | (空)        |
  * | 高度50%  | 上移    | 水平间距−   |
  * | 左移     | 自由移动 | 右移        |
- * | 原始尺寸 | 下移    | 屏幕间距    |
+ * | 原始尺寸 | 底部对齐 | 右对齐      |
  */
-private fun toolGridPortrait(width100: ToolCell, width50: ToolCell): Array<Array<ToolCell?>> = arrayOf(
+private fun toolGridPortrait(
+    width100: ToolCell,
+    width50: ToolCell,
+    bottomDevice: ToolCell,
+): Array<Array<ToolCell?>> = arrayOf(
     arrayOf(CELL_HEIGHT_100, CELL_GAP_PLUS, null),
     arrayOf(CELL_HEIGHT_50, width100, CELL_GAP_MINUS),
     arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, width50),
-    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_SCREEN_GAP),
+    arrayOf(CELL_ORIGINAL_SIZE, bottomDevice, CELL_ALIGN_RIGHT),
 )
 
 /** Applies a gap delta to both screens (the gap is shared between them). */

@@ -4,6 +4,25 @@
 
 ---
 
+## v1.17 - 2026-09-01
+
+### NDS 编辑器：拖动仅限框内 + R3C3 右对齐 + R4C2 设备底对齐（版本升至 1.19.8-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 263 / versionName 1.19.8 / suffix -v8b**:
+
+1. **拖动只在虚线框内响应（BUG，回退 v1.15 的全屏可拖）** — v1.15 把 overlay 合并为单个 full-screen Box、手势挂在容器上，导致手指落在**任意位置**都能拖动选中屏。用户明确要求：手指必须**先按在虚线框范围内**才响应移动，框外触摸移动不响应。现新增 `PointerInputScope.dragInsideFrame`：用 `awaitFirstDown(requireConsumption=false)` 拿到按下点，把 top/bottom 帧矩形从 root 坐标平移到本 Box 局部坐标（与 tap-to-select 同一套 `translate(-fp.left,-fp.top)` 命中算法）做命中测试——命中哪块框就选中并拖动它；**完全落在所有框外则直接 return，不消费、不动任何屏**。单指 pan、双指以中点为基准 pinch-zoom（`previousPosition`/`position` 距离比），循环 `awaitPointerEvent` 直到所有手指抬起。移除了不再使用的 `detectTransformGestures` 导入。
+2. **R3C3 改为右对齐（BUG）** — R3C3（nds_tile_r3c3，原"Screen Gap"）改为**右对齐**：选中屏贴靠显示区右边缘（`AlignEdge.RIGHT`）。新建图标 `nds_tile_align_right.xml`（镜像 r2c1 左对齐瓦片：右箭头+右侧竖条），横屏/竖屏网格的 R3C3 格位均替换为 `CELL_ALIGN_RIGHT`。
+3. **R4C2 底部对齐到设备屏幕底（BUG）** — 竖屏工具箱 R4C2（下移，nds_tile_r3c2）此前对齐到游戏视图锚点底边（`viewPos.bottom`）。用户要求"底部=设备屏幕底部"。新增 `AlignEdge.BOTTOM_DEVICE`：`alignToEdge` 对其用 `fullPos.bottom`（全屏 GLRetroView 即物理屏底）而非 `viewPos.bottom`；竖屏 R4C2 改为运行时 cell `bottomDevice`（`remember{}`，action=align(BOTTOM_DEVICE)），横屏"下移"保持对齐游戏视图锚点不变。
+4. **宽度工具确认** — R1C2=宽度 100%、R2C3=宽度 50%（v1.15/v1.16 已实现）经本次核对无误，保持不变。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — 新增 `dragInsideFrame` 手势（仅框内响应）、`alignToEdge` 增加 `BOTTOM_DEVICE` 分支（`fullPos.bottom`）、移除 `detectTransformGestures`、新增相关导入
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — `AlignEdge` 增 `BOTTOM_DEVICE`；R3C3 → `CELL_ALIGN_RIGHT`（右对齐）；竖屏 R4C2 → `bottomDevice`（设备底对齐）；grid 工厂函数签名更新
+- `lemuroid-app/.../res/drawable/nds_tile_align_right.xml` — 新增右对齐瓦片图标
+- `lemuroid-app/build.gradle.kts` — versionCode 262→263、versionName 1.19.7→1.19.8
+
+---
+
 ## v1.16 - 2026-09-03
 
 ### NDS 编辑器：去掉工具箱整块深色底板（版本升至 1.19.7-v8b）

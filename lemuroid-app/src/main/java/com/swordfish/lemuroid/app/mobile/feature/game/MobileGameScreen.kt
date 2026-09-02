@@ -7,7 +7,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -43,6 +42,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,8 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
@@ -613,6 +616,58 @@ private fun normalizeToFullScreen(
 }
 
 /**
+ * Drag/zoom gesture that only engages when the initial press lands INSIDE one of the dashed
+ * frames. The pressed frame's screen becomes the target; a single finger pans it and two
+ * fingers pinch-zoom it around the midpoint. Pressing outside every frame does nothing — the
+ * touch is released without moving any screen (bug1: 框外触摸移动不响应).
+ */
+private fun PointerInputScope.dragInsideFrame(
+    topRectLatest: State<Rect>,
+    bottomRectLatest: State<Rect>,
+    fullPosLatest: State<Rect?>,
+    selectedScreen: MutableState<ScreenLayoutManager.ScreenId>,
+    onTransform: (ScreenLayoutManager.ScreenId, Float, Float, Float) -> Unit,
+) {
+    awaitPointerEventScope {
+        val down = awaitFirstDown(requireConsumption = false)
+        val fp = fullPosLatest.value ?: return@awaitPointerEventScope
+        // Frame rects are in root coords; the press is local to this full-screen Box, so shift
+        // them into the same space before the hit test (same math as the tap-to-select handler).
+        val topLocal = topRectLatest.value.translate(-fp.left, -fp.top)
+        val bottomLocal = bottomRectLatest.value.translate(-fp.left, -fp.top)
+        val target =
+            when {
+                topLocal.contains(down.position) -> ScreenLayoutManager.ScreenId.TOP
+                bottomLocal.contains(down.position) -> ScreenLayoutManager.ScreenId.BOTTOM
+                else -> return@awaitPointerEventScope // outside every frame: ignore this gesture
+            }
+        selectedScreen.value = target
+
+        var lastX = down.position.x
+        var lastY = down.position.y
+        while (true) {
+            val event = awaitPointerEvent()
+            if (!event.changes.any { it.pressed }) break // all fingers lifted → end gesture
+            val zoomChange =
+                if (event.changes.size >= 2) {
+                    val prev = event.changes[0].previousPosition.distanceTo(event.changes[1].previousPosition)
+                    val now = event.changes[0].position.distanceTo(event.changes[1].position)
+                    if (prev > 0f) now / prev else 1f
+                } else {
+                    1f
+                }
+            val midX = event.changes.first().position.x +
+                (if (event.changes.size >= 2) (event.changes[1].position.x - event.changes[0].position.x) / 2f else 0f)
+            val midY = event.changes.first().position.y +
+                (if (event.changes.size >= 2) (event.changes[1].position.y - event.changes[0].position.y) / 2f else 0f)
+            onTransform(target, midX - lastX, midY - lastY, zoomChange)
+            lastX = midX
+            lastY = midY
+        }
+    }
+}
+
+/**
  * Full-screen editor overlay for the NDS dual-screen layout customizer.
  * Shows a dashed frame per screen; tap a frame to select it, drag to move, pinch to zoom.
  * The bottom card mirrors the selection and offers sliders plus profile management.
@@ -666,7 +721,10 @@ private fun ScreenLayoutEditorOverlay(
             val (ox, oy) =
                 when (edge) {
                     AlignEdge.TOP -> transform.offsetX to (viewPos.top - (cy - halfH))
+                    // BOTTOM anchors to the game-view anchor; BOTTOM_DEVICE anchors to the
+                    // physical device screen bottom (fullPos.bottom) — portrait R4C2.
                     AlignEdge.BOTTOM -> transform.offsetX to (viewPos.bottom - (cy + halfH))
+                    AlignEdge.BOTTOM_DEVICE -> transform.offsetX to (fullPos.bottom - (cy + halfH))
                     AlignEdge.LEFT -> (viewPos.left - (cx - halfW)) to transform.offsetY
                     AlignEdge.RIGHT -> (viewPos.right - (cx + halfW)) to transform.offsetY
                     AlignEdge.CENTER -> 0f to 0f
@@ -695,19 +753,26 @@ private fun ScreenLayoutEditorOverlay(
                         }
                     }
                     .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            val selected = selectedScreen.value
-                            val current = layoutStateLatest.value.transformOf(selected)
-                            viewModel.updateScreenLayoutTransform(
-                                selected,
-                                current.offsetX + pan.x,
-                                current.offsetY + pan.y,
-                                (current.scale * zoom).coerceIn(
-                                    ScreenLayoutManager.MIN_SCALE,
-                                    ScreenLayoutManager.MAX_SCALE,
-                                ),
-                            )
-                        }
+                        // Drag/zoom only engages when the press starts INSIDE a dashed frame;
+                        // touching and moving outside any frame does nothing (bug1).
+                        dragInsideFrame(
+                            topRectLatest = topRectLatest,
+                            bottomRectLatest = bottomRectLatest,
+                            fullPosLatest = fullPosLatest,
+                            selectedScreen = selectedScreen,
+                            onTransform = { screen, dx, dy, zoom ->
+                                val current = layoutStateLatest.value.transformOf(screen)
+                                viewModel.updateScreenLayoutTransform(
+                                    screen,
+                                    current.offsetX + dx,
+                                    current.offsetY + dy,
+                                    (current.scale * zoom).coerceIn(
+                                        ScreenLayoutManager.MIN_SCALE,
+                                        ScreenLayoutManager.MAX_SCALE,
+                                    ),
+                                )
+                            },
+                        )
                     },
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
