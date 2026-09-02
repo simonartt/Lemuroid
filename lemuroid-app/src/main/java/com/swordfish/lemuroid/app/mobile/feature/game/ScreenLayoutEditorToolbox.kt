@@ -56,10 +56,13 @@ fun ScreenLayoutEditorToolbox(
     onAlignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit,
     onClose: () -> Unit,
 ) {
+    // No panel background — the tiles and zoom buttons each carry their own white rounded
+    // base (design §4.1/§4.2), so the toolbox floats directly over the game picture. A solid
+    // dark Surface here used to leave a big empty black block under the shorter zoom panel.
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(8.dp),
-        color = Color(0xCC1C1C20),
+        color = Color.Transparent,
         shadowElevation = 0.dp,
     ) {
         Row(

@@ -4,6 +4,19 @@
 
 ---
 
+## v1.16 - 2026-09-03
+
+### NDS 编辑器：去掉工具箱整块深色底板（版本升至 1.19.7-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 262 / versionName 1.19.7 / suffix -v8b**:
+
+1. **工具箱不再有整块深色面板背景（优化）** — v1.15 只去掉了阴影，但用户指出的是"按钮集下面一整块黑底框"：工具箱 `Surface(color=0xCC1C1C20)` 包裹 grid+缩放面板，竖屏时左侧 grid（4 行）比右侧缩放面板（3 行）高，顶部对齐后面板背景在缩放按钮下方露出一大块黑色区域。现把 Surface 背景改为 **`Color.Transparent`**（阴影 v1.15 已为 0）。每个工具瓦片自带白底圆角方块+#48DAFF 描边、缩放按钮自带白底+虚线框（设计文档 §4.1/§4.2），去掉深底后按钮直接浮在游戏画面上，依然清晰。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — 工具箱 Surface `color` `0xCC1C1C20` → `Color.Transparent`
+
+---
+
 ## v1.15 - 2026-09-01
 
 ### NDS 编辑器：倍率按钮互斥 + 全屏可拖 + 宽度百分比工具 + 去工具箱阴影（版本升至 1.19.6-v8b）
