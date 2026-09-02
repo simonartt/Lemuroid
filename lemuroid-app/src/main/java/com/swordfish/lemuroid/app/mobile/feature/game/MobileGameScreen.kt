@@ -579,6 +579,40 @@ private fun normalizeToFullScreen(
 }
 
 /**
+ * Aspect-fits content of [contentAspect] (width/height) inside [rect], returning the centered
+ * fitted rect. This mirrors the native `VideoLayout::updateForegroundQuad` letterboxing so the
+ * editor's dashed frames line up exactly with what is actually rendered on screen.
+ */
+private fun aspectFitRect(rect: Rect, contentAspect: Float): Rect {
+    val rectAspect = if (rect.height > 0f) rect.width / rect.height else 0f
+    if (rectAspect <= 0f || contentAspect <= 0f) return rect
+    val fittedWidth: Float
+    val fittedHeight: Float
+    if (contentAspect > rectAspect) {
+        // Content is relatively taller → limited by the width, shrink height.
+        fittedWidth = rect.width
+        fittedHeight = rect.width / contentAspect
+    } else {
+        // Content is relatively wider → limited by the height, shrink width.
+        fittedWidth = rect.height * contentAspect
+        fittedHeight = rect.height
+    }
+    val cx = (rect.left + rect.right) / 2f
+    val cy = (rect.top + rect.bottom) / 2f
+    return Rect(
+        left = cx - fittedWidth / 2f,
+        top = cy - fittedHeight / 2f,
+        right = cx + fittedWidth / 2f,
+        bottom = cy + fittedHeight / 2f,
+    )
+}
+
+/** Per-screen (256×192) content aspect — matches native `contentAspect = aspectRatio * 2`. */
+private val NDS_SCREEN_ASPECT = NDS_SCREEN_WIDTH / NDS_SCREEN_HEIGHT
+/** Full-frame (256×384, both screens stacked) content aspect used in default single-viewport mode. */
+private val NDS_FULL_FRAME_ASPECT = NDS_SCREEN_WIDTH / (NDS_SCREEN_HEIGHT * 2f)
+
+/**
  * Full-screen editor overlay for the NDS dual-screen layout customizer.
  * Shows a dashed frame per screen; tap a frame to select it, drag to move, pinch to zoom.
  * The bottom card mirrors the selection and offers sliders plus profile management.
@@ -598,9 +632,32 @@ private fun ScreenLayoutEditorOverlay(
     val toolboxVisible = remember { mutableStateOf(false) }
 
     if (fullPos != null && viewPos != null) {
+        // Natural rects are needed both for display and for the align/center tools.
         val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, density)
-        val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f)
-        val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f)
+
+        // The dashed frames MUST match what is actually rendered:
+        //  - Default layout → single viewport: the whole NDS frame (256×384) is aspect-fit into
+        //    viewPos; each screen is one half of that fitted quad.
+        //  - Custom layout → split viewport: each screen rect is aspect-fit to its per-screen
+        //    aspect (256×192), exactly like the native updateForegroundQuad letterboxing.
+        val applyCustomLayout = viewModel.isNdsSystem() && !layoutState.isDefault
+        val topRect: Rect
+        val bottomRect: Rect
+        if (applyCustomLayout) {
+            topRect = aspectFitRect(
+                applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f),
+                NDS_SCREEN_ASPECT,
+            )
+            bottomRect = aspectFitRect(
+                applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f),
+                NDS_SCREEN_ASPECT,
+            )
+        } else {
+            val fittedFull = aspectFitRect(viewPos, NDS_FULL_FRAME_ASPECT)
+            val midY = (fittedFull.top + fittedFull.bottom) / 2f
+            topRect = Rect(fittedFull.left, fittedFull.top, fittedFull.right, midY)
+            bottomRect = Rect(fittedFull.left, midY, fittedFull.right, fittedFull.bottom)
+        }
 
         Box(
             modifier =
@@ -691,13 +748,14 @@ private fun ScreenLayoutEditorOverlay(
                     onAlignToEdge = alignToEdge,
                     onClose = { toolboxVisible.value = false },
                 )
-                ScreenLayoutBottomBar(
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                    viewModel = viewModel,
-                    isLandscape = isLandscape,
-                    onCloseToolbox = { toolboxVisible.value = false },
-                )
             }
+            // Bottom bar is ALWAYS visible — only the center button / toolbox panel toggle.
+            ScreenLayoutBottomBar(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                viewModel = viewModel,
+                isLandscape = isLandscape,
+                onCloseToolbox = { toolboxVisible.value = false },
+            )
         }
     }
 }
