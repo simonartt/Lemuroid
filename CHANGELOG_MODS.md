@@ -6,6 +6,19 @@
 
 ## v1.21 - 2026-09-03
 
+### NDS 编辑器：把手箭头短粗 + 编辑界面隐藏右上☰ + 缩放中可双指平移 + 子菜单固定宽左对齐（版本升至 1.20.3-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 268 / versionName 1.20.3 / suffix -v8b**（用户 v1.20.2 实测反馈）:
+
+1. **把手双头箭头短一点、粗一点（需求①）** — 对角线端点留白 `m: 10f→17f`（50dp 框内箭头明显变短），全部线宽 `strokeWidth 3f→5f`，箭头人字头 8f→7f。
+2. **取消编辑界面右上角三横条按钮（需求②）** — `DraggableMenuButton`（☰，原本仅在虚拟按键隐藏时显示）在编辑器打开时**一并隐藏**：条件加 `&& !editScreenLayoutShown.value`。出口已有底栏"菜单▸返回游戏菜单"，☰ 与其重复。非编辑态行为不变。
+3. **缩放把手时仍可平移虚线框（需求③）** — `dragResizeHandle` 重写为**多指双角色**手势：一根手指按住把手=等比缩放（左上角锚定，语义同 v1.20.2）；期间**另一根手指按住任意框体即可拖动该屏位置**（增量累加 `panDX/panDY`，与缩放位移**可加**：`offset = 冻结基准 + hw0·(k−1) + panD`）。单指语义兜底：无缩放进行时按框体=选中+平移（等同普通模式）；每根手指按 `PointerId` 绑定角色，抬手不中断另一指；把手**每次按下都从实时 transform 重冻结基准**（k=1 恒等于"当前尺寸"，不会跳回旧值）。`.pointerInput` key 增加 `isLandscape`（旋转后把手命中区随布局刷新）。新增 import：`PointerId`。
+4. **子菜单固定宽度 + 左对齐（需求④）** — `ScreenLayoutSubmenu` Surface 从 `fillMaxWidth()` 改 `widthIn(min=300.dp, max=300.dp)`（固定 300dp），调用点对齐 `Alignment.BottomCenter→BottomStart`（左下角，紧贴底栏"菜单"按钮上方）。横屏不再被拉成通栏、行内文字不再两头散开。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `dragResizeHandle`（双角色多指循环）；把手 Canvas 箭头参数；`DraggableMenuButton` 显示条件；`ScreenLayoutSubmenu` Surface 宽度 + 调用点 align；import `PointerId`
+- `lemuroid-app/build.gradle.kts` — versionCode 267→268、versionName 1.20.2→1.20.3
+
 ### NDS 编辑器：缩放把手四处修正（框内/虚线/双向箭头/灵敏度+宽度上限）（版本升至 1.20.2-v8b）
 
 **分支 `v8b-nds-editor`，versionCode 267 / versionName 1.20.2 / suffix -v8b**（用户 v1.20.1 实测反馈）:

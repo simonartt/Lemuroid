@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
@@ -290,8 +291,10 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
             }
         }
 
-        // Draggable floating menu button — shown when virtual controls are hidden
-        if (!touchControlsVisibleState.value) {
+        // Draggable floating menu button — shown when virtual controls are hidden.
+        // Hidden while the NDS layout editor is open (v1.20.3): the editor's bottom-bar 菜单
+        // sub-menu already offers 返回游戏菜单, so the top-right ☰ would only overlap it.
+        if (!touchControlsVisibleState.value && !editScreenLayoutShown.value) {
             DraggableMenuButton(viewModel)
         }
 
@@ -707,17 +710,19 @@ private suspend fun PointerInputScope.dragInsideFrame(
 }
 
 /**
- * Proportional-resize gesture (resize mode). The resize GRAB is the 50dp square handle drawn
- * INSIDE the selected frame's bottom-right corner — only a press inside that handle starts a
- * resize. Pressing a frame body elsewhere just switches the selection (so the user can pick the
- * other screen without leaving resize mode). Presses outside every frame are ignored.
+ * Resize-mode gesture: dragging the 50dp handle at the selected frame's bottom-right scales that
+ * frame PROPORTIONALLY with its TOP-LEFT corner pinned. Since v1.20.3 a SECOND finger holding a
+ * frame body pans the SAME frame while the resize finger keeps scaling — the two contributions are
+ * additive: offset = frozen base + resize delta + pan delta.
  *
- * The frame scales PROPORTIONALLY with its TOP-LEFT corner pinned (user-pinned 2b). To avoid the
- * old compounding bug (scale grew exponentially → the frame exploded in one flick), the gesture
- * FREEZES the transform at press time (t0, hw0, hh0, TL, ref) and each move computes
- * k = (pointer axis distance from TL) / ref against that frozen base: newScale = t0.scale · k.
- * The mapping is ~1:1 between finger travel and frame-edge travel (no sensitivity runaway), and
- * the EFFECTIVE WIDTH is additionally clamped to the device screen width (fp.width).
+ * Roles: at most one resize finger (must land on the handle) and one pan finger (any frame body).
+ * A frame-body press with no resize running behaves like normal mode: select + pan. Presses
+ * outside every frame are ignored.
+ *
+ * Sensitivity: everything is measured against a base FROZEN at first press (t0, hw0, hh0, baseW1)
+ * — newScale = t0.scale · (d/ref), 1:1 with finger travel, no per-event compounding — and the
+ * effective WIDTH is clamped to the device screen width. When the resize finger lands after a pan
+ * started, the existing frozen base is REUSED (no re-freeze) so the scale continues seamlessly.
  */
 private suspend fun PointerInputScope.dragResizeHandle(
     selectedScreen: MutableState<ScreenLayoutManager.ScreenId>,
@@ -729,91 +734,128 @@ private suspend fun PointerInputScope.dragResizeHandle(
     handleSizePx: Float,
     onResize: (ScreenLayoutManager.ScreenId, Float, Float, Float) -> Unit,
 ) {
+    val dominantX = !isLandscape
     awaitPointerEventScope {
         while (true) {
-            var press: Offset? = null
-            while (press == null) {
-                val ev = awaitPointerEvent()
-                for (c in ev.changes) {
-                    if (c.changedToDown() && !c.isConsumed) {
-                        press = c.position
-                        break
+            var resizeId: PointerId? = null
+            var panId: PointerId? = null
+            var target: ScreenLayoutManager.ScreenId? = null
+            var t0: ScreenLayoutManager.ScreenTransform? = null
+            var hw0 = 0f
+            var hh0 = 0f
+            var baseW1 = 0f
+            var kApplied = 1f
+            var tlMainAxis = 0f
+            var ref = 1f
+            var panDX = 0f
+            var panDY = 0f
+            var panLastX = 0f
+            var panLastY = 0f
+
+            var running = true
+            while (running) {
+                val event = awaitPointerEvent()
+                val fp = fullPosLatest.value ?: break
+                val layout = layoutStateLatest.value
+                val topLocal = applyScreenLayoutTransform(
+                    naturalTopLatest.value, layout.topScreen, gapSign = -1f, isLandscape,
+                ).translate(-fp.left, -fp.top)
+                val bottomLocal = applyScreenLayoutTransform(
+                    naturalBottomLatest.value, layout.bottomScreen, gapSign = +1f, isLandscape,
+                ).translate(-fp.left, -fp.top)
+
+                // --- assign new presses to roles ---
+                for (c in event.changes) {
+                    if (!c.changedToDown() || c.isConsumed) continue
+                    val p = c.position
+                    val selFrame =
+                        if (selectedScreen.value == ScreenLayoutManager.ScreenId.TOP) topLocal else bottomLocal
+                    val onHandle =
+                        p.x >= selFrame.right - handleSizePx && p.x <= selFrame.right &&
+                            p.y >= selFrame.bottom - handleSizePx && p.y <= selFrame.bottom
+                    if (resizeId == null && onHandle) {
+                        resizeId = c.id
+                        // (Re-)freeze the base from the LIVE transform on EVERY handle press, so
+                        // k=1 always means "current size" (a fresh press after a pan+resize must
+                        // not jump back to the original). Accumulated pan is folded into the base.
+                        val s = selectedScreen.value
+                        val nat =
+                            if (s == ScreenLayoutManager.ScreenId.TOP) naturalTopLatest.value else naturalBottomLatest.value
+                        val t = layout.transformOf(s)
+                        val w = nat.width * t.scale * t.scaleX / 2f
+                        val h = nat.height * t.scale * t.scaleY / 2f
+                        if (t.scale <= 0f || w <= 0f || h <= 0f) { resizeId = null; continue }
+                        target = s
+                        t0 = t; hw0 = w; hh0 = h; baseW1 = w / t.scale
+                        kApplied = 1f; panDX = 0f; panDY = 0f
+                        // ref/TL measured live from the press, so the first move of a still finger
+                        // gives k = 1 (no jump).
+                        tlMainAxis = if (dominantX) selFrame.left else selFrame.top
+                        ref = ((if (dominantX) p.x else p.y) - tlMainAxis).coerceAtLeast(1f)
+                    } else if (panId == null && (topLocal.contains(p) || bottomLocal.contains(p))) {
+                        panId = c.id
+                        panLastX = p.x
+                        panLastY = p.y
+                        if (t0 == null) {
+                            // Standalone pan: select the pressed frame and freeze it as the base.
+                            val s =
+                                if (topLocal.contains(p)) ScreenLayoutManager.ScreenId.TOP else ScreenLayoutManager.ScreenId.BOTTOM
+                            selectedScreen.value = s
+                            val nat =
+                                if (s == ScreenLayoutManager.ScreenId.TOP) naturalTopLatest.value else naturalBottomLatest.value
+                            val t = layout.transformOf(s)
+                            val w = nat.width * t.scale * t.scaleX / 2f
+                            val h = nat.height * t.scale * t.scaleY / 2f
+                            if (t.scale <= 0f || w <= 0f || h <= 0f) { panId = null; continue }
+                            target = s
+                            t0 = t; hw0 = w; hh0 = h; baseW1 = w / t.scale
+                            kApplied = 1f; panDX = 0f; panDY = 0f
+                        }
+                        // If a resize base already exists, the pan just adds to it (same target).
                     }
                 }
-            }
-            val pressPos = press
-            val fp = fullPosLatest.value ?: continue
-            val layout = layoutStateLatest.value
-            // CURRENT (transformed) frame rects, in Box-local space.
-            val topRectLocal =
-                applyScreenLayoutTransform(naturalTopLatest.value, layout.topScreen, gapSign = -1f, isLandscape)
-                    .translate(-fp.left, -fp.top)
-            val bottomRectLocal =
-                applyScreenLayoutTransform(
-                    naturalBottomLatest.value,
-                    layout.bottomScreen,
-                    gapSign = +1f,
-                    isLandscape,
-                ).translate(-fp.left, -fp.top)
-            val target =
-                when {
-                    topRectLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.TOP
-                    bottomRectLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.BOTTOM
-                    else -> null // outside every frame: ignore this gesture
-                }
-            if (target == null) continue
-            selectedScreen.value = target
-            val frame = if (target == ScreenLayoutManager.ScreenId.TOP) topRectLocal else bottomRectLocal
-            // Resize only when the press lands on the bottom-right 50dp handle (drawn inside the
-            // frame). Any other press inside the frame merely selects it.
-            val inHandle =
-                pressPos.x >= frame.right - handleSizePx && pressPos.x <= frame.right &&
-                    pressPos.y >= frame.bottom - handleSizePx && pressPos.y <= frame.bottom
-            if (!inHandle) continue
 
-            // Freeze everything for this gesture — scale k is ALWAYS relative to this base, never
-            // to the live state (that compounding was the "explodes in one flick" bug).
-            val t0 = layoutStateLatest.value.transformOf(target)
-            val natural =
-                if (target == ScreenLayoutManager.ScreenId.TOP) naturalTopLatest.value else naturalBottomLatest.value
-            val hw0 = natural.width * t0.scale * t0.scaleX / 2f
-            val hh0 = natural.height * t0.scale * t0.scaleY / 2f
-            if (hw0 <= 0f || hh0 <= 0f || t0.scale <= 0f) continue
-            // Half-size per unit scale → effective width at scale s is 2·baseW1·s (used for the
-            // device-width clamp below).
-            val baseW1 = hw0 / t0.scale
-            // Pinned anchor = frame's current top-left corner (already includes offset/gap).
-            val tlx = frame.left
-            val tly = frame.top
-            // Dominant axis: width in portrait, height in landscape. Reference = the press's own
-            // distance from TL, so the first move (still finger) gives k = 1 — no jump.
-            val dominantX = !isLandscape
-            val tlAxis = if (dominantX) tlx else tly
-            val ref = if (dominantX) pressPos.x - tlx else pressPos.y - tly
-            if (ref <= 0f) continue
-
-            while (true) {
-                val event = awaitPointerEvent()
-                if (!event.changes.any { it.pressed }) break // all fingers lifted → end gesture
-                val pos = event.changes.first().position
-                val d = if (dominantX) pos.x - tlAxis else pos.y - tlAxis
-                if (d <= 0f) continue
-                val k = (d / ref).coerceIn(0.05f, 20f)
-                var newScale = (t0.scale * k).coerceIn(ScreenLayoutManager.MIN_SCALE, ScreenLayoutManager.MAX_SCALE)
-                // Clamp the effective WIDTH to the device screen width (user: 宽度超出设备宽没有限制).
-                val effW = 2f * baseW1 * newScale
-                if (effW > fp.width) {
-                    newScale = (newScale * fp.width / effW).coerceAtLeast(ScreenLayoutManager.MIN_SCALE)
+                // --- apply per-role movement ---
+                val rr = resizeId?.let { id -> event.changes.firstOrNull { it.id == id } }
+                if (rr != null) {
+                    if (rr.pressed) {
+                        val d = (if (dominantX) rr.position.x else rr.position.y) - tlMainAxis
+                        if (d > 0f) kApplied = (d / ref).coerceIn(0.05f, 20f)
+                    } else {
+                        resizeId = null // lift keeps kApplied frozen — frame stays scaled
+                    }
                 }
-                // Keep TL pinned: the center (== offset) moves by half the size delta, relative to
-                // the frozen base.
-                val kApplied = newScale / t0.scale
-                onResize(
-                    target,
-                    t0.offsetX + hw0 * (kApplied - 1f),
-                    t0.offsetY + hh0 * (kApplied - 1f),
-                    newScale,
-                )
+                val pp = panId?.let { id -> event.changes.firstOrNull { it.id == id } }
+                if (pp != null) {
+                    if (pp.pressed) {
+                        panDX += pp.position.x - panLastX
+                        panDY += pp.position.y - panLastY
+                        panLastX = pp.position.x
+                        panLastY = pp.position.y
+                    } else {
+                        panId = null // lift keeps accumulated panDX/panDY
+                    }
+                }
+                if (resizeId == null && panId == null) { running = false; break }
+
+                // --- ONE additive emit: frozen base + resize delta + pan delta ---
+                val t = t0
+                val s = target
+                if (t != null && s != null) {
+                    var newScale =
+                        (t.scale * kApplied).coerceIn(ScreenLayoutManager.MIN_SCALE, ScreenLayoutManager.MAX_SCALE)
+                    val effW = 2f * baseW1 * newScale
+                    if (fp.width > 0f && effW > fp.width) {
+                        newScale = (newScale * fp.width / effW).coerceAtLeast(ScreenLayoutManager.MIN_SCALE)
+                    }
+                    val actualK = newScale / t.scale
+                    onResize(
+                        s,
+                        t.offsetX + hw0 * (actualK - 1f) + panDX,
+                        t.offsetY + hh0 * (actualK - 1f) + panDY,
+                        newScale,
+                    )
+                }
             }
         }
     }
@@ -907,7 +949,7 @@ private fun ScreenLayoutEditorOverlay(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .pointerInput(resizeMode.value) {
+                    .pointerInput(resizeMode.value, isLandscape) {
                         if (resizeMode.value) {
                             dragResizeHandle(
                                 selectedScreen = selectedScreen,
@@ -986,17 +1028,19 @@ private fun ScreenLayoutEditorOverlay(
                         style = Stroke(width = 3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f))),
                     )
                     // ↖↘ double-headed arrow along the diagonal (heads on BOTH ends).
-                    val m = 10f
+                    // Short & thick (user v1.20.3): margins 17f keep the diagonal compact,
+                    // strokeWidth 5f makes it readable inside the small handle.
+                    val m = 17f
                     val c0 = Offset(m, m)
                     val c1 = Offset(size.width - m, size.height - m)
-                    drawLine(lineColor, c0, c1, strokeWidth = 3f)
-                    val head = 8f
+                    drawLine(lineColor, c0, c1, strokeWidth = 5f)
+                    val head = 7f
                     // Bottom-right head.
-                    drawLine(lineColor, Offset(c1.x - head, c1.y), c1, strokeWidth = 3f)
-                    drawLine(lineColor, Offset(c1.x, c1.y - head), c1, strokeWidth = 3f)
+                    drawLine(lineColor, Offset(c1.x - head, c1.y), c1, strokeWidth = 5f)
+                    drawLine(lineColor, Offset(c1.x, c1.y - head), c1, strokeWidth = 5f)
                     // Top-left head.
-                    drawLine(lineColor, Offset(c0.x + head, c0.y), c0, strokeWidth = 3f)
-                    drawLine(lineColor, Offset(c0.x, c0.y + head), c0, strokeWidth = 3f)
+                    drawLine(lineColor, Offset(c0.x + head, c0.y), c0, strokeWidth = 5f)
+                    drawLine(lineColor, Offset(c0.x, c0.y + head), c0, strokeWidth = 5f)
                 }
             }
 
@@ -1037,7 +1081,7 @@ private fun ScreenLayoutEditorOverlay(
             // "菜单" sub-menu: save/load the current layout into a slot + return to game menu.
             if (menuOpen.value) {
                 ScreenLayoutSubmenu(
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    modifier = Modifier.align(Alignment.BottomStart),
                     viewModel = viewModel,
                     layoutState = layoutState,
                     isLandscape = isLandscape,
@@ -1139,7 +1183,9 @@ private fun ScreenLayoutSubmenu(
     val dir = if (isLandscape) "横" else "竖"
     val activeLabel = viewModel.currentScreenLayoutSlotLabel()
     Surface(
-        modifier = modifier.fillMaxWidth().clickable { /* swallow taps so the editor underneath never drags */ },
+        // FIXED width, bottom-LEFT aligned (user v1.20.3): in landscape a fillMaxWidth card
+        // stretches across the whole screen and every row's text gets pulled apart.
+        modifier = modifier.widthIn(min = 300.dp, max = 300.dp).clickable { /* swallow taps so the editor underneath never drags */ },
         color = Color(0xFF252528),
     ) {
         Column(
