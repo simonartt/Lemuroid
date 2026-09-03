@@ -4,6 +4,23 @@
 
 ---
 
+## v1.18 - 2026-09-03
+
+### NDS 编辑器：修复框内拖不动 + 工具箱默认关闭 + 竖屏网格格位归位（版本升至 1.19.9-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 264 / versionName 1.19.9 / suffix -v8b**:
+
+1. **修复"无论触摸在哪都拖不动"（BUG）** — v1.17 在同一个全屏 Box 上挂了**两个** `.pointerInput`：`detectTapGestures`（选屏）与 `dragInsideFrame`（拖动）。两个 handler 竞争同一条事件流：`detectTapGestures` 先消费 `down`/`move`，`dragInsideFrame` 拿不到干净的按下点，**框内框外全都拖不动**。现合并为**单一** `dragInsideFrame`：按下命中某框 → 立即选中该屏并进入拖拽（单指 pan、双指 pinch-zoom）；按下在所有框外 → 外层 `while(true)+continue` 忽略本次、不消费、不移动并继续监听下一次按下。删除 `detectTapGestures` 及其导入。子级（工具箱瓦片/底栏按钮）的 clickable 先消费事件，故按下检测加 `!c.isConsumed` 守卫，避免点按钮时误拖其下虚线框。
+2. **工具箱默认关闭（BUG）** — 进入编辑界面时工具箱原默认展开。用户要求：默认关闭，底栏按钮此时显示"打开工具箱"。`ScreenLayoutEditorOverlay` 的 `toolboxVisible` 初值 `true` → `false`。
+3. **竖屏网格格位归位（BUG）** — 用户多次钉死格位：R1C2=宽度100%、R2C3=宽度50%、R3C3=右对齐、R4C2=底部对齐(贴设备屏底)、**R4C3 必须留空**。v1.17 竖屏实现却排成 R2C2=宽度100%、R3C3=宽度50%、R4C3=右对齐（即"莫名多出 R4C3 右对齐按钮"）。`toolGridPortrait` 按上述格位重排；横屏网格本就正确，仅修正其过时注释（R1C2/R2C3 实为宽度 100%/50%，非"上移/右移"）。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `dragInsideFrame` 合并选屏逻辑成唯一手势（外层 `while(true)`+`continue` 忽略框外按下、`!isConsumed` 守卫子级点击）；移除 Box 上竞争的 `detectTapGestures` pointerInput 与导入；`toolboxVisible` 初值改 `false`
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — `toolGridPortrait` 竖屏网格按钉死格位重排（R4C3 留空）；横屏网格文档注释更正
+- `lemuroid-app/build.gradle.kts` — versionCode 263→264、versionName 1.19.8→1.19.9
+
+---
+
 ## v1.17 - 2026-09-01
 
 ### NDS 编辑器：拖动仅限框内 + R3C3 右对齐 + R4C2 设备底对齐（版本升至 1.19.8-v8b）

@@ -206,11 +206,12 @@ private val CELL_ALIGN_RIGHT = ToolCell("右对齐", R.drawable.nds_tile_align_r
 }
 
 /**
- * Landscape arrangement — the design's 4×3 grid:
+ * Landscape arrangement — the design's 4×3 grid (R1C2 = 宽度100%, R2C3 = 宽度50%,
+ * R3C3 = 右对齐, matching the user-pinned cells):
  *
- * | R1C1 高度50% | R1C2 上移 | R1C3 水平间距− | R1C4 高度100% |
- * | R2C1 左移    | R2C2 自由移动 | R2C3 右移   | R2C4 间距+    |
- * | R3C1 原始尺寸 | R3C2 下移 | R3C3 右对齐   | (空位)        |
+ * | R1C1 高度50% | R1C2 宽度100% | R1C3 水平间距− | R1C4 高度100% |
+ * | R2C1 左移    | R2C2 自由移动 | R2C3 宽度50%   | R2C4 间距+    |
+ * | R3C1 原始尺寸 | R3C2 下移    | R3C3 右对齐     | (空位)        |
  */
 private fun toolGridLandscape(width100: ToolCell, width50: ToolCell): Array<Array<ToolCell?>> = arrayOf(
     arrayOf(CELL_HEIGHT_50, width100, CELL_GAP_MINUS, CELL_HEIGHT_100),
@@ -219,27 +220,24 @@ private fun toolGridLandscape(width100: ToolCell, width50: ToolCell): Array<Arra
 )
 
 /**
- * Portrait arrangement — same tools, re-arranged per design: R1C4 (高度100%) is placed
- * directly above R1C1 (高度50%), and R2C4 (间距+) directly above R1C2 (上移). Every other
- * cell keeps its original column position from the landscape grid. The 4th landscape column
- * (which becomes empty after the two promotions) is dropped entirely — NOT kept as empty
- * slots — so the toolbox stays compact, centered on screen with even spacing to the zoom
- * panel:
+ * Portrait arrangement — 4×3. The user-pinned cells (both orientations): R1C2 = 宽度100%,
+ * R2C3 = 宽度50%, R3C3 = 右对齐, R4C2 = 底部对齐（贴设备屏底）. R4C3 is empty. The remaining
+ * tools keep a sensible grouping around the pinned cells:
  *
- * | 高度100% | 间距+   | (空)        |
- * | 高度50%  | 上移    | 水平间距−   |
- * | 左移     | 自由移动 | 右移        |
- * | 原始尺寸 | 底部对齐 | 右对齐      |
+ * | 高度100% | 宽度100% | 水平间距− |
+ * | 高度50%  | 间距+    | 宽度50%   |
+ * | 左对齐   | 自由移动 | 右对齐    |
+ * | 原始尺寸 | 底部对齐 | (空)      |
  */
 private fun toolGridPortrait(
     width100: ToolCell,
     width50: ToolCell,
     bottomDevice: ToolCell,
 ): Array<Array<ToolCell?>> = arrayOf(
-    arrayOf(CELL_HEIGHT_100, CELL_GAP_PLUS, null),
-    arrayOf(CELL_HEIGHT_50, width100, CELL_GAP_MINUS),
-    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, width50),
-    arrayOf(CELL_ORIGINAL_SIZE, bottomDevice, CELL_ALIGN_RIGHT),
+    arrayOf(CELL_HEIGHT_100, width100, CELL_GAP_MINUS),
+    arrayOf(CELL_HEIGHT_50, CELL_GAP_PLUS, width50),
+    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, CELL_ALIGN_RIGHT),
+    arrayOf(CELL_ORIGINAL_SIZE, bottomDevice, null),
 )
 
 /** Applies a gap delta to both screens (the gap is shared between them). */

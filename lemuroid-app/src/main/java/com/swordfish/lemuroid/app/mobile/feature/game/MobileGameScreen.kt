@@ -6,7 +6,6 @@ import android.graphics.RectF
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -619,10 +618,13 @@ private fun normalizeToFullScreen(
 private fun Offset.distanceTo(other: Offset): Float = kotlin.math.hypot(x - other.x, y - other.y)
 
 /**
- * Drag/zoom gesture that only engages when the initial press lands INSIDE one of the dashed
- * frames. The pressed frame's screen becomes the target; a single finger pans it and two
- * fingers pinch-zoom it around the midpoint. Pressing outside every frame does nothing — the
- * touch is released without moving any screen (bug1: 框外触摸移动不响应).
+ * Unified tap + drag/zoom gesture for the editor overlay. A single pointer handler owns ALL
+ * touches on the full-screen Box (no competing detectTapGestures — two handlers fighting over
+ * the same events made drags inside a frame stop working):
+ *
+ * - Press INSIDE a dashed frame → that screen is selected immediately; if the finger then
+ *   moves, a single finger pans it and two fingers pinch-zoom around the midpoint.
+ * - Press OUTSIDE every frame → nothing happens (no selection change, no move).
  */
 private suspend fun PointerInputScope.dragInsideFrame(
     topRectLatest: State<Rect>,
@@ -632,51 +634,62 @@ private suspend fun PointerInputScope.dragInsideFrame(
     onTransform: (ScreenLayoutManager.ScreenId, Float, Float, Float) -> Unit,
 ) {
     awaitPointerEventScope {
-        // Compose 1.6 has no awaitFirstDown — wait for the first finger-down manually.
-        var press: Offset? = null
-        while (press == null) {
-            val ev = awaitPointerEvent()
-            for (c in ev.changes) {
-                if (c.changedToDown()) {
-                    press = c.position
-                    break
-                }
-            }
-        }
-        val pressPos = press ?: return@awaitPointerEventScope
-        val fp = fullPosLatest.value ?: return@awaitPointerEventScope
-        // Frame rects are in root coords; the press is local to this full-screen Box, so shift
-        // them into the same space before the hit test (same math as the tap-to-select handler).
-        val topLocal = topRectLatest.value.translate(-fp.left, -fp.top)
-        val bottomLocal = bottomRectLatest.value.translate(-fp.left, -fp.top)
-        val target =
-            when {
-                topLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.TOP
-                bottomLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.BOTTOM
-                else -> return@awaitPointerEventScope // outside every frame: ignore this gesture
-            }
-        selectedScreen.value = target
-
-        var lastX = pressPos.x
-        var lastY = pressPos.y
+        // Outer loop: after each gesture (or an ignored outside press) keep listening for the
+        // next finger-down instead of completing and depending on pointerInput restart.
         while (true) {
-            val event = awaitPointerEvent()
-            if (!event.changes.any { it.pressed }) break // all fingers lifted → end gesture
-            val zoomChange =
-                if (event.changes.size >= 2) {
-                    val prev = event.changes[0].previousPosition.distanceTo(event.changes[1].previousPosition)
-                    val now = event.changes[0].position.distanceTo(event.changes[1].position)
-                    if (prev > 0f) now / prev else 1f
-                } else {
-                    1f
+            // Compose 1.6 has no awaitFirstDown — wait for the first finger-down manually.
+            // Skip already-consumed downs: those belong to children (toolbox tiles, bottom
+            // bar buttons) and must not select or drag the frame underneath them.
+            var press: Offset? = null
+            while (press == null) {
+                val ev = awaitPointerEvent()
+                for (c in ev.changes) {
+                    if (c.changedToDown() && !c.isConsumed) {
+                        press = c.position
+                        break
+                    }
                 }
-            val midX = event.changes.first().position.x +
-                (if (event.changes.size >= 2) (event.changes[1].position.x - event.changes[0].position.x) / 2f else 0f)
-            val midY = event.changes.first().position.y +
-                (if (event.changes.size >= 2) (event.changes[1].position.y - event.changes[0].position.y) / 2f else 0f)
-            onTransform(target, midX - lastX, midY - lastY, zoomChange)
-            lastX = midX
-            lastY = midY
+            }
+            val pressPos = press
+            val fp = fullPosLatest.value
+            // Frame rects are in root coords; the press is local to this full-screen Box, so
+            // shift them into the same space before the hit test.
+            val target =
+                if (fp == null) {
+                    null
+                } else {
+                    val topLocal = topRectLatest.value.translate(-fp.left, -fp.top)
+                    val bottomLocal = bottomRectLatest.value.translate(-fp.left, -fp.top)
+                    when {
+                        topLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.TOP
+                        bottomLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.BOTTOM
+                        else -> null // outside every frame: ignore this gesture
+                    }
+                }
+            if (target == null) continue
+            selectedScreen.value = target
+
+            var lastX = pressPos.x
+            var lastY = pressPos.y
+            while (true) {
+                val event = awaitPointerEvent()
+                if (!event.changes.any { it.pressed }) break // all fingers lifted → end gesture
+                val zoomChange =
+                    if (event.changes.size >= 2) {
+                        val prev = event.changes[0].previousPosition.distanceTo(event.changes[1].previousPosition)
+                        val now = event.changes[0].position.distanceTo(event.changes[1].position)
+                        if (prev > 0f) now / prev else 1f
+                    } else {
+                        1f
+                    }
+                val midX = event.changes.first().position.x +
+                    (if (event.changes.size >= 2) (event.changes[1].position.x - event.changes[0].position.x) / 2f else 0f)
+                val midY = event.changes.first().position.y +
+                    (if (event.changes.size >= 2) (event.changes[1].position.y - event.changes[0].position.y) / 2f else 0f)
+                onTransform(target, midX - lastX, midY - lastY, zoomChange)
+                lastX = midX
+                lastY = midY
+            }
         }
     }
 }
@@ -696,9 +709,9 @@ private fun ScreenLayoutEditorOverlay(
     screenHeightPx: Float,
 ) {
     val selectedScreen = remember { mutableStateOf(ScreenLayoutManager.ScreenId.TOP) }
-    // The floating toolbox is visible as soon as the editor opens; only "关闭工具箱"
-    // in the bottom bar hides it (design §7.5). No separate open button exists.
-    val toolboxVisible = remember { mutableStateOf(true) }
+    // The toolbox starts HIDDEN when the editor opens; the "打开工具箱" item in the bottom
+    // bar shows it, and "关闭工具箱" hides it again (design §7.5).
+    val toolboxVisible = remember { mutableStateOf(false) }
 
     if (fullPos != null && viewPos != null) {
         val isLandscape = screenWidthPx > screenHeightPx
@@ -746,29 +759,15 @@ private fun ScreenLayoutEditorOverlay(
             viewModel.setScreenLayoutOffset(screen, ox, oy)
         }
 
-        // Single full-screen Box: pointer handlers on the container so drags work ANYWHERE on
-        // screen (not just inside the dashed frames). Toolbox and bottom bar are children;
-        // their own clickable modifiers consume taps before they reach the transform gestures.
+        // Single full-screen Box with ONE pointer handler: dragInsideFrame handles both
+        // tap-to-select (press inside a frame selects it) and drag/pinch (move to pan, two
+        // fingers to zoom). Pressing outside every frame does nothing. A second detectTapGestures
+        // here used to compete for the same events and broke drags inside frames — removed.
         Box(
             modifier =
                 Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
-                        detectTapGestures { tap ->
-                            val fp = fullPosLatest.value ?: return@detectTapGestures
-                            val topLocal = topRectLatest.value.translate(-fp.left, -fp.top)
-                            val bottomLocal = bottomRectLatest.value.translate(-fp.left, -fp.top)
-                            selectedScreen.value =
-                                when {
-                                    topLocal.contains(tap) -> ScreenLayoutManager.ScreenId.TOP
-                                    bottomLocal.contains(tap) -> ScreenLayoutManager.ScreenId.BOTTOM
-                                    else -> selectedScreen.value
-                                }
-                        }
-                    }
-                    .pointerInput(Unit) {
-                        // Drag/zoom only engages when the press starts INSIDE a dashed frame;
-                        // touching and moving outside any frame does nothing (bug1).
                         dragInsideFrame(
                             topRectLatest = topRectLatest,
                             bottomRectLatest = bottomRectLatest,
