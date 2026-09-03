@@ -4,6 +4,26 @@
 
 ---
 
+## v1.20 - 2026-09-03
+
+### NDS 编辑器：底栏 4 项 + 等比缩放把手（左上角锚定）+ 菜单子菜单 + 竖/横各 3 槽位存储（版本升至 1.20.1-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 266 / versionName 1.20.1 / suffix -v8b**:
+
+1. **删除灰色"编辑全局布局"禁用按钮（需求①）** — 底栏无功能的预留占位项删除，5 项变 4 项：菜单 / 重设回默认 / 关闭·打开工具箱 / 调整屏幕大小。
+2. **"调整屏幕大小"= 等比缩放模式开关（需求②）** — 原为"退出编辑器"，现改为模式开关：单击进入**缩放模式**（按钮文字变"返回"，再点退出回普通编辑），选中虚线框**右下角**出现 **50dp 白底蓝边圆角把手**（内 Canvas 手绘 ↘ 双向箭头，不用 `Icons.Default.SouthEast`——compose-icons core 1.6.1 无此图标）。拖动把手**等比缩放**该屏，**左上角固定不动**（用户拍板 2b）。缩放数学：锚点=框当前实际左上角 TL（由 `applyScreenLayoutTransform` 得到，含 offset/gap）；参考距离 `ref`=按下点沿主轴（竖屏 x / 横屏 y）到 TL 距离；每帧 `k=(d/ref)`、`newScale=clamp(scale·k)`，再按实际应用系数 `kApplied=newScale/scale` 平移 offset（`ox'=offsetX+hw·(kApplied−1)`，`oy'=offsetY+hh·(kApplied−1)`）→ TL 纹丝不动、宽高同步。首帧 k≈1 无跳变。缩放模式下点按框内**只选中不平移**（`dragInsideFrame` 不挂），双指捏合不生效（预期）。
+3. **编辑器出口并入"菜单"子菜单（用户拍板 2a）** — 底栏"菜单"（第 1 项）点击弹**子菜单** `ScreenLayoutSubmenu`（不再直开模拟器主菜单）：标题"保存 / 载入布局（横/竖版 · 全局）"；只读行"**现在布局**：{槽位名 | 默认（未保存）}"；**当前方向** 3 个槽位各一行（已占用显 ●，当前激活槽浅色高亮+名称蓝 #35b5e8），行右侧"保存""载入"（空槽载入置灰）；底部"**返回游戏菜单**"（= `toggleEditScreenLayout(false)` + `showGameMenu()`，即编辑器出口）。子菜单 Surface 带 no-op clickable 吞点按，防止底下编辑器手势误拖。
+4. **布局存储改为竖/横各 3 槽位（方案 A，用户拍板）** — 原数据层有一套无 UI 引用的死代码 `profiles`/`activeProfileId`，本次删除，换成 `slots: Map<String, Slot>`（key=`portrait_1`…`landscape_3`，`SLOTS_PER_ORIENTATION=3`）+ `activeSlot`。**全局、跨 NDS 游戏共用**，竖版横版分开各 3 槽。旋转屏幕自动切到对应方向最后使用的槽（`onOrientationChanged`：目标方向有槽→载入其最后使用槽；activeSlot 已属该方向→不动；**无槽→保留当前工作值但清空 activeSlot**，UI 显示"默认（未保存）"，避免横竖串标）。旧 profiles 数据不迁移（无 UI 用过，加载时直接忽略回默认）。将来若要"每游戏独立"，只需 slot key 加 gameId 维度，架构预留不返工。
+
+**修改文件**:
+- `lemuroid-app/.../shared/game/screenlayout/ScreenLayoutManager.kt` — 删 profiles 整套；新增 `Slot`/`slotKey()`/`saveToSlot`/`loadFromSlot`/`onOrientationChanged`/`activeSlotLabel`；`ScreenLayoutState` 增 `slots`/`activeSlot`；`loadState` 按 activeSlot 恢复工作值
+- `lemuroid-app/.../shared/game/viewmodel/GameViewModelScreenLayout.kt` + `BaseGameScreenViewModel.kt` — profile facade 方法换成 `saveScreenLayoutToSlot`/`loadScreenLayoutFromSlot`/`onScreenLayoutOrientationChanged`/`currentScreenLayoutSlotLabel`（`updateScreenLayoutTransform` 语义不变：只覆盖 offsetX/Y+scale、保留 scaleX/scaleY/gap——缩放手势依赖此点）
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — `ScreenLayoutBottomBar` 新签名（`resizeMode`/`onToggleResizeMode`/`onMenu`），删"编辑全局布局"禁用项
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — overlay 新增 `resizeMode`/`menuOpen` 状态；`.pointerInput(resizeMode.value)` 按模式二选一挂 `dragInsideFrame`/`dragResizeHandle`（**单一 handler 原则**，见 MEMORY 避坑）；新增 `dragResizeHandle` 手势 + 右下角 50dp 把手渲染 + `ScreenLayoutSubmenu` 子菜单；`LaunchedEffect(isLandscape)` 追加 `onScreenLayoutOrientationChanged` 自动切方向槽位
+- `lemuroid-app/build.gradle.kts` — versionCode 265→266、versionName 1.20.0→1.20.1
+
+---
+
 ## v1.19 - 2026-09-03
 
 ### NDS 编辑器：图标-功能按"现状格位"归位 + 四向箭头环绕居中 + 唯一间距按钮（版本升至 1.20.0-v8b）
