@@ -707,18 +707,17 @@ private suspend fun PointerInputScope.dragInsideFrame(
 }
 
 /**
- * Proportional-resize gesture (resize mode). Pressing INSIDE a frame selects that screen, then
- * dragging scales it PROPORTIONALLY with its TOP-LEFT corner pinned (user-pinned anchor): the
- * pointer's distance from the pinned top-left along the DOMINANT axis sets the new size, so both
- * width and height grow/shrink together. Pressing outside every frame does nothing.
+ * Proportional-resize gesture (resize mode). The resize GRAB is the 50dp square handle drawn
+ * INSIDE the selected frame's bottom-right corner — only a press inside that handle starts a
+ * resize. Pressing a frame body elsewhere just switches the selection (so the user can pick the
+ * other screen without leaving resize mode). Presses outside every frame are ignored.
  *
- * Math (Box-local space): the frame's current top-left corner TL is read from the LIVE layout
- * transform (it already includes offset + gap), and (hw, hh) are its effective half-size =
- * natural · scale · scaleX(Y) / 2. A press at distance d0 from TL on the dominant axis
- * (x in portrait, y in landscape) is the per-gesture reference; each move to distance d gives
- * k = d/d0 (so the first move event with a still finger is k = 1, i.e. no jump). newScale =
- * scale·k. The offsets are then shifted by hw·(k−1) / hh·(k−1) so TL never moves while the
- * width and height scale together.
+ * The frame scales PROPORTIONALLY with its TOP-LEFT corner pinned (user-pinned 2b). To avoid the
+ * old compounding bug (scale grew exponentially → the frame exploded in one flick), the gesture
+ * FREEZES the transform at press time (t0, hw0, hh0, TL, ref) and each move computes
+ * k = (pointer axis distance from TL) / ref against that frozen base: newScale = t0.scale · k.
+ * The mapping is ~1:1 between finger travel and frame-edge travel (no sensitivity runaway), and
+ * the EFFECTIVE WIDTH is additionally clamped to the device screen width (fp.width).
  */
 private suspend fun PointerInputScope.dragResizeHandle(
     selectedScreen: MutableState<ScreenLayoutManager.ScreenId>,
@@ -727,6 +726,7 @@ private suspend fun PointerInputScope.dragResizeHandle(
     fullPosLatest: State<Rect?>,
     layoutStateLatest: State<ScreenLayoutManager.ScreenLayoutState>,
     isLandscape: Boolean,
+    handleSizePx: Float,
     onResize: (ScreenLayoutManager.ScreenId, Float, Float, Float) -> Unit,
 ) {
     awaitPointerEventScope {
@@ -744,7 +744,7 @@ private suspend fun PointerInputScope.dragResizeHandle(
             val pressPos = press
             val fp = fullPosLatest.value ?: continue
             val layout = layoutStateLatest.value
-            // Hit test uses the CURRENT (transformed) frame rects, in Box-local space.
+            // CURRENT (transformed) frame rects, in Box-local space.
             val topRectLocal =
                 applyScreenLayoutTransform(naturalTopLatest.value, layout.topScreen, gapSign = -1f, isLandscape)
                     .translate(-fp.left, -fp.top)
@@ -763,20 +763,34 @@ private suspend fun PointerInputScope.dragResizeHandle(
                 }
             if (target == null) continue
             selectedScreen.value = target
+            val frame = if (target == ScreenLayoutManager.ScreenId.TOP) topRectLocal else bottomRectLocal
+            // Resize only when the press lands on the bottom-right 50dp handle (drawn inside the
+            // frame). Any other press inside the frame merely selects it.
+            val inHandle =
+                pressPos.x >= frame.right - handleSizePx && pressPos.x <= frame.right &&
+                    pressPos.y >= frame.bottom - handleSizePx && pressPos.y <= frame.bottom
+            if (!inHandle) continue
 
-            // Pinned anchor = the selected frame's current top-left corner (includes offset/gap).
+            // Freeze everything for this gesture — scale k is ALWAYS relative to this base, never
+            // to the live state (that compounding was the "explodes in one flick" bug).
+            val t0 = layoutStateLatest.value.transformOf(target)
             val natural =
                 if (target == ScreenLayoutManager.ScreenId.TOP) naturalTopLatest.value else naturalBottomLatest.value
-            val frame = if (target == ScreenLayoutManager.ScreenId.TOP) topRectLocal else bottomRectLocal
+            val hw0 = natural.width * t0.scale * t0.scaleX / 2f
+            val hh0 = natural.height * t0.scale * t0.scaleY / 2f
+            if (hw0 <= 0f || hh0 <= 0f || t0.scale <= 0f) continue
+            // Half-size per unit scale → effective width at scale s is 2·baseW1·s (used for the
+            // device-width clamp below).
+            val baseW1 = hw0 / t0.scale
+            // Pinned anchor = frame's current top-left corner (already includes offset/gap).
             val tlx = frame.left
             val tly = frame.top
-            // Dominant axis: width in portrait, height in landscape.
+            // Dominant axis: width in portrait, height in landscape. Reference = the press's own
+            // distance from TL, so the first move (still finger) gives k = 1 — no jump.
             val dominantX = !isLandscape
             val tlAxis = if (dominantX) tlx else tly
-            // Reference distance on the dominant axis from the pinned top-left to the press.
-            val ref =
-                if (dominantX) pressPos.x - tlAxis else pressPos.y - tlAxis
-            if (ref <= 0f) continue // press landed exactly on the pinned edge: nothing to measure
+            val ref = if (dominantX) pressPos.x - tlx else pressPos.y - tly
+            if (ref <= 0f) continue
 
             while (true) {
                 val event = awaitPointerEvent()
@@ -784,20 +798,20 @@ private suspend fun PointerInputScope.dragResizeHandle(
                 val pos = event.changes.first().position
                 val d = if (dominantX) pos.x - tlAxis else pos.y - tlAxis
                 if (d <= 0f) continue
-                // Re-read the live transform: a previous event in this gesture already updated it.
-                val t = layoutStateLatest.value.transformOf(target)
-                val hw = natural.width * t.scale * t.scaleX / 2f
-                val hh = natural.height * t.scale * t.scaleY / 2f
-                if (hw <= 0f || hh <= 0f) break
-                val k = (d / ref).coerceIn(0.1f, 10f)
-                val newScale = (t.scale * k).coerceIn(ScreenLayoutManager.MIN_SCALE, ScreenLayoutManager.MAX_SCALE)
-                // Apply the ACTUAL factor (clamping may have reduced k) and shift the offsets by
-                // hw·(k−1) / hh·(k−1) so the top-left corner of the frame never moves.
-                val kApplied = newScale / t.scale
+                val k = (d / ref).coerceIn(0.05f, 20f)
+                var newScale = (t0.scale * k).coerceIn(ScreenLayoutManager.MIN_SCALE, ScreenLayoutManager.MAX_SCALE)
+                // Clamp the effective WIDTH to the device screen width (user: 宽度超出设备宽没有限制).
+                val effW = 2f * baseW1 * newScale
+                if (effW > fp.width) {
+                    newScale = (newScale * fp.width / effW).coerceAtLeast(ScreenLayoutManager.MIN_SCALE)
+                }
+                // Keep TL pinned: the center (== offset) moves by half the size delta, relative to
+                // the frozen base.
+                val kApplied = newScale / t0.scale
                 onResize(
                     target,
-                    t.offsetX + hw * (kApplied - 1f),
-                    t.offsetY + hh * (kApplied - 1f),
+                    t0.offsetX + hw0 * (kApplied - 1f),
+                    t0.offsetY + hh0 * (kApplied - 1f),
                     newScale,
                 )
             }
@@ -880,6 +894,10 @@ private fun ScreenLayoutEditorOverlay(
             viewModel.setScreenLayoutOffset(screen, ox, oy)
         }
 
+        // The resize handle is a 50dp square; compute its pixel size once here (composable scope
+        // has LocalDensity) and share it between the gesture hit-test and the drawing below.
+        val handlePx = with(LocalDensity.current) { 50.dp.toPx() }
+
         // Single full-screen Box with ONE pointer handler. The handler is chosen by mode and the
         // block re-runs when [resizeMode] flips (keyed on it) so only one gesture loop is ever live:
         // - normal mode → dragInsideFrame (tap-to-select + drag/pinch);
@@ -898,6 +916,7 @@ private fun ScreenLayoutEditorOverlay(
                                 fullPosLatest = fullPosLatest,
                                 layoutStateLatest = layoutStateLatest,
                                 isLandscape = isLandscape,
+                                handleSizePx = handlePx,
                                 onResize = { screen, ox, oy, scale ->
                                     viewModel.updateScreenLayoutTransform(screen, ox, oy, scale)
                                 },
@@ -939,37 +958,45 @@ private fun ScreenLayoutEditorOverlay(
                 )
             }
 
-            // Proportional-resize handle: in resize mode it sits at the SELECTED frame's
-            // bottom-right corner (50dp square, ↘ arrow). Dragging it scales the frame with its
-            // top-left corner pinned. Tapping a frame selects it; tap again to drag the handle.
+            // Proportional-resize handle: in resize mode a 50dp square sits INSIDE the selected
+            // frame's bottom-right corner (inset by its own size), drawn as a DASHED blue outline
+            // with NO fill and a ↖↘ double-headed arrow. Dragging it scales the frame with its
+            // top-left corner pinned; presses on the frame body elsewhere just switch selection.
             if (resizeMode.value) {
                 val selRect =
                     if (selectedScreen.value == ScreenLayoutManager.ScreenId.TOP) topRect else bottomRect
-                Box(
-                    modifier = Modifier
-                        .offset {
-                            IntOffset(
-                                (selRect.right - fullPos.left).toInt(),
-                                (selRect.bottom - fullPos.top).toInt(),
-                            )
-                        }
-                        .size(50.dp)
-                        .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(6.dp))
-                        .border(2.dp, Color(0xFF35b5e8), RoundedCornerShape(6.dp)),
-                    contentAlignment = Alignment.Center,
+                Canvas(
+                    modifier =
+                        Modifier
+                            .offset {
+                                IntOffset(
+                                    (selRect.right - fullPos.left - handlePx).toInt(),
+                                    (selRect.bottom - fullPos.top - handlePx).toInt(),
+                                )
+                            }
+                            .size(50.dp),
                 ) {
-                    // ↘ double-arrow drawn with Canvas (Icons.Default.SouthEast is not in core icons).
-                    // DrawScope units are already pixels — no toPx() needed (Float.toPx doesn't exist).
-                    Canvas(modifier = Modifier.size(28.dp)) {
-                        val p = 4f
-                        val corner = size.minDimension - p
-                        val lineColor = Color.Black
-                        drawLine(lineColor, Offset(p, p), Offset(corner, corner), strokeWidth = 3f)
-                        // Arrowhead at the bottom-right tip: two short strokes back toward center.
-                        val head = 9f
-                        drawLine(lineColor, Offset(corner - head, corner), Offset(corner, corner), strokeWidth = 3f)
-                        drawLine(lineColor, Offset(corner, corner - head), Offset(corner, corner), strokeWidth = 3f)
-                    }
+                    val lineColor = Color(0xFF35b5e8)
+                    // Dashed rounded square, no fill — matches the editor's dashed-frame language.
+                    drawRoundRect(
+                        color = lineColor,
+                        topLeft = Offset(2f, 2f),
+                        size = Size(size.width - 4f, size.height - 4f),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f),
+                        style = Stroke(width = 3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f))),
+                    )
+                    // ↖↘ double-headed arrow along the diagonal (heads on BOTH ends).
+                    val m = 10f
+                    val c0 = Offset(m, m)
+                    val c1 = Offset(size.width - m, size.height - m)
+                    drawLine(lineColor, c0, c1, strokeWidth = 3f)
+                    val head = 8f
+                    // Bottom-right head.
+                    drawLine(lineColor, Offset(c1.x - head, c1.y), c1, strokeWidth = 3f)
+                    drawLine(lineColor, Offset(c1.x, c1.y - head), c1, strokeWidth = 3f)
+                    // Top-left head.
+                    drawLine(lineColor, Offset(c0.x + head, c0.y), c0, strokeWidth = 3f)
+                    drawLine(lineColor, Offset(c0.x, c0.y + head), c0, strokeWidth = 3f)
                 }
             }
 

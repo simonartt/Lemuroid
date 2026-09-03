@@ -4,6 +4,24 @@
 
 ---
 
+## v1.21 - 2026-09-03
+
+### NDS 编辑器：缩放把手四处修正（框内/虚线/双向箭头/灵敏度+宽度上限）（版本升至 1.20.2-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 267 / versionName 1.20.2 / suffix -v8b**（用户 v1.20.1 实测反馈）:
+
+1. **把手位置：从框外挪进框内（BUG）** — 原把手定位到选中框右下角顶点处、整体溢出框外。现偏移减把手尺寸（`right-50dp / bottom-50dp`），50dp 方块**完整落在虚线框内**贴右下角。
+2. **把手样式（需求）** — 原白底实色填充+实线蓝边 → 改为**无填充 + `#35b5e8` 虚线圆角方框**（与编辑器虚线框设计语言一致）；箭头从 ↘ 单向 → **↖↘ 对角双端箭头**（两端各两个人字头）。整个把手改单 Canvas 绘制（`drawRoundRect` + `Stroke(pathEffect=dashPathEffect)`，CornerRadius 用全限定名避免加 import）。
+3. **缩放"一下子变巨大"（BUG，根因=复合缩放）** — 旧实现每帧 `newScale = live(t.scale) × k`，而 `k` 又是相对**按下基准**的绝对比值 → 同一手势内事件级联指数放大（k 的幂），手指稍快一甩就爆大。现**按下瞬间冻结基准**（t0/hw0/hh0/TL/ref），每个 move 事件都算 `newScale = t0.scale × (d/ref)`——手指位移与框边位移 1:1 线性对应，无累积；k 夹 0.05..20、scale 仍夹 MIN/MAX。
+4. **宽度无上限（BUG）** — 缩放后有效宽度超过设备屏宽没有约束。现每次应用前算 `effW = 2·baseW1·newScale`（baseW1=hw0/t0.scale），若 `effW > fp.width`（GLRetroView 全屏矩形=物理屏宽）则按比例回缩 `newScale ×= fp.width/effW`，**宽度硬上限=设备屏宽**（左上角锚定语义不变，等比故高度随宽度联动）。
+5. **把手命中区收窄（配套）** — 缩放模式下现在**只有按下把手方块区域**才启动缩放；按下框内其他位置仅**切换选中屏**（旧版按框内任意点即拖缩放，与"拖把手"的设计不符，也是误触发爆大的入口）。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `dragResizeHandle`（冻结基准+inHandle 命中+宽度钳制）；overlay 把手渲染（offset 减 handlePx、Canvas 虚线框+双端箭头、`with(LocalDensity.current){50.dp.toPx()}`）
+- `lemuroid-app/build.gradle.kts` — versionCode 266→267、versionName 1.20.1→1.20.2
+
+---
+
 ## v1.20 - 2026-09-03
 
 ### NDS 编辑器：底栏 4 项 + 等比缩放把手（左上角锚定）+ 菜单子菜单 + 竖/横各 3 槽位存储（版本升至 1.20.1-v8b）
