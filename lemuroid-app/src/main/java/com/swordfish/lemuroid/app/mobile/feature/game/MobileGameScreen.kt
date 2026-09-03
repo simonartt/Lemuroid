@@ -631,7 +631,18 @@ private suspend fun PointerInputScope.dragInsideFrame(
     onTransform: (ScreenLayoutManager.ScreenId, Float, Float, Float) -> Unit,
 ) {
     awaitPointerEventScope {
-        val down = awaitFirstDown(requireConsumption = false)
+        // Compose 1.6 has no awaitFirstDown — wait for the first finger-down manually.
+        var press: Offset? = null
+        while (press == null) {
+            val ev = awaitPointerEvent()
+            for (c in ev.changes) {
+                if (c.changedToDown()) {
+                    press = c.position
+                    break
+                }
+            }
+        }
+        val pressPos = press ?: return@awaitPointerEventScope
         val fp = fullPosLatest.value ?: return@awaitPointerEventScope
         // Frame rects are in root coords; the press is local to this full-screen Box, so shift
         // them into the same space before the hit test (same math as the tap-to-select handler).
@@ -639,14 +650,14 @@ private suspend fun PointerInputScope.dragInsideFrame(
         val bottomLocal = bottomRectLatest.value.translate(-fp.left, -fp.top)
         val target =
             when {
-                topLocal.contains(down.position) -> ScreenLayoutManager.ScreenId.TOP
-                bottomLocal.contains(down.position) -> ScreenLayoutManager.ScreenId.BOTTOM
+                topLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.TOP
+                bottomLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.BOTTOM
                 else -> return@awaitPointerEventScope // outside every frame: ignore this gesture
             }
         selectedScreen.value = target
 
-        var lastX = down.position.x
-        var lastY = down.position.y
+        var lastX = pressPos.x
+        var lastY = pressPos.y
         while (true) {
             val event = awaitPointerEvent()
             if (!event.changes.any { it.pressed }) break // all fingers lifted → end gesture
