@@ -4,6 +4,24 @@
 
 ---
 
+## v1.19 - 2026-09-03
+
+### NDS 编辑器：图标-功能按"现状格位"归位 + 四向箭头环绕居中 + 唯一间距按钮（版本升至 1.20.0-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 265 / versionName 1.20.0 / suffix -v8b**:
+
+1. **图标与功能张冠李戴（BUG）** — v1.17/v1.18 把功能挪进用户钉死的格位时，功能仍带着它在**原始设计稿格位**的图标（`nds_tile_*` drawable 的文件名=原始稿格位，非现状格位），导致宽度100%按钮显示↑、宽度50%显示→、间距按钮显示↔百分比。本次按**现状格位**逐一核对图标视觉并修正：宽度100%→↔100% 图标（`nds_tile_r2c4`）、宽度50%→↔50% 图标（`nds_tile_r1c3`）。所有讨论坐标系统一改为**现状布局**（用户明确要求）。
+2. **四个方向箭头对齐按钮应环绕居中按钮（设计修正）** — ↑↓←→ 四张箭头瓦片此前散落（↑挂在宽度100%上、→挂在宽度50%上），逻辑上应包围居中按钮。竖屏现状：↑=R2C2（**新增上对齐按钮**，`AlignEdge.TOP` 贴设备屏顶 `fullPos.top`）、←=R3C1、→=R3C3、↓=R4C2、✛=R3C2。横屏同理重排为四向环绕 R2C2 居中。
+3. **间距按钮从两个归为一个（设计修正）** — 原"间距−(↔50%图标)"与"间距+(↔100%图标)"两按钮删除；全工具箱**只有一个间距按钮**，图标为设计稿原始 R3C3 格位的 `tiles/R3C3.svg`（仓内即 `nds_tile_r3c3.xml`，两横线夹竖向 10px 箭头），竖屏放 **R4C3**。行为：点击循环 缝隙 0→16→32→48→0 px（`cycleGap`，步长/回绕常量 `GAP_CYCLE_STEP/GAP_CYCLE_MAX`）。
+4. **竖屏最终网格** — R1[高度100%(↕100) | 宽度100%(↔100) | 空位] / R2[高度50%(↕50) | 上对齐(↑) | 宽度50%(↔50)] / R3[左对齐(←) | 居中(✛) | 右对齐(→)] / R4[原始尺寸 | 底部对齐(↓贴设备底) | 间距(10px图标)]。横屏：R1[高50|上对齐↑|高100|宽100] / R2[左←|居中✛|右→|宽50] / R3[原始|下对齐↓|间距|空]。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — width100/width50 换图标 drawable；新增 `CELL_ALIGN_TOP`（`nds_tile_r1c2` ↑）与 `CELL_GAP`（`nds_tile_r3c3`）；删除 `CELL_GAP_MINUS/CELL_GAP_PLUS`；`CELL_ALIGN_BOTTOM` 改用 `AlignEdge.BOTTOM_DEVICE`（横竖屏底部对齐统一贴设备屏底）；`toolGridPortrait/toolGridLandscape` 重排；`nudgeGap`→`cycleGap`
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `alignToEdge` 的 `AlignEdge.TOP` 锚点由 `viewPos.top` 改为 `fullPos.top`（贴设备屏顶）
+- `lemuroid-app/build.gradle.kts` — versionCode 264→265、versionName 1.19.9→1.20.0
+
+---
+
 ## v1.18 - 2026-09-03
 
 ### NDS 编辑器：修复框内拖不动 + 工具箱默认关闭 + 竖屏网格格位归位（版本升至 1.19.9-v8b）

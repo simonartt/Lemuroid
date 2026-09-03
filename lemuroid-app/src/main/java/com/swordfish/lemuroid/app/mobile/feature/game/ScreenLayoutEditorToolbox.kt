@@ -70,28 +70,25 @@ fun ScreenLayoutEditorToolbox(
             horizontalArrangement = Arrangement.spacedBy(if (isLandscape) 8.dp else 10.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            // Tool grid (left) — icons are the design's own SVG tiles.
-            // Portrait mode uses a 4×4 arrangement with R1C4/R2C4 promoted to the top row.
+            // Tool grid (left) — icons are the design's own SVG tiles. NOTE: the nds_tile_*
+            // drawable FILENAMES preserve the ORIGINAL figma-export sheet position (tiles/RxCy.svg);
+            // which cell actually uses a tile is decided by the grid functions below. All cell
+            // positions in comments are CURRENT-layout coordinates.
             // The two width-percent cells need runtime geometry, so they're built here and
             // injected into the grid layout (remembered on the geometry values).
             val width100 = remember(displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx) {
-                ToolCell("宽度 100%", R.drawable.nds_tile_r1c2) { vm, s, _ ->
+                // ↔100% glyph (sheet name R2C4, but it is the WIDTH 100% icon).
+                ToolCell("宽度 100%", R.drawable.nds_tile_r2c4) { vm, s, _ ->
                     setWidthPercent(vm, s, 1.0f, displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx)
                 }
             }
             val width50 = remember(displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx) {
-                ToolCell("宽度 50%", R.drawable.nds_tile_r2c3) { vm, s, _ ->
+                // ↔50% glyph (sheet name R1C3, but it is the WIDTH 50% icon).
+                ToolCell("宽度 50%", R.drawable.nds_tile_r1c3) { vm, s, _ ->
                     setWidthPercent(vm, s, 0.5f, displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx)
                 }
             }
-            // Portrait R4C2 (下移): align to the DEVICE screen bottom (fullPos.bottom), not the
-            // game-view anchor — see AlignEdge.BOTTOM_DEVICE in MobileGameScreen.alignToEdge.
-            val bottomDevice = remember {
-                ToolCell("底部对齐", R.drawable.nds_tile_r3c2) { _, _, align ->
-                    align(AlignEdge.BOTTOM_DEVICE)
-                }
-            }
-            val grid = if (isLandscape) toolGridLandscape(width100, width50) else toolGridPortrait(width100, width50, bottomDevice)
+            val grid = if (isLandscape) toolGridLandscape(width100, width50) else toolGridPortrait(width100, width50)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (row in grid.indices) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -157,7 +154,11 @@ private fun ToolGridButton(
     }
 }
 
-/** A tool grid cell definition. [drawable] is the design's exported tile (figma-export/tiles/RxCy.svg). */
+/**
+ * A tool grid cell definition. [drawable] is the design's exported tile
+ * (figma-export/tiles/RxCy.svg) — the FILENAME records the tile's ORIGINAL sheet position,
+ * which does NOT necessarily match the cell it is used in today (see the grid functions).
+ */
 private class ToolCell(
     val label: String,
     val drawable: Int,
@@ -170,84 +171,91 @@ private val CELL_HEIGHT_50 = ToolCell(
     R.drawable.nds_tile_r1c1,
 ) { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_HALF) }
 
-private val CELL_GAP_MINUS = ToolCell(
-    "水平间距调节",
-    R.drawable.nds_tile_r1c3,
-) { vm, s, _ -> nudgeGap(vm, s, -ScreenLayoutManager.GAP_DELTA) }
-
 private val CELL_HEIGHT_100 = ToolCell(
     "纵向缩放 100%",
     R.drawable.nds_tile_r1c4,
 ) { vm, s, _ -> vm.setScreenLayoutVerticalScale(s, ScreenLayoutManager.VERTICAL_SCALE_FULL) }
 
-private val CELL_ALIGN_LEFT = ToolCell("左移", R.drawable.nds_tile_r2c1) { _, _, align ->
+// The four directional-align cells surround the center cell in both grids (design logic).
+// Their glyphs are the sheet's 上/下/左/右移 tiles; filenames keep the ORIGINAL sheet position.
+private val CELL_ALIGN_TOP = ToolCell("上对齐", R.drawable.nds_tile_r1c2) { _, _, align ->
+    align(AlignEdge.TOP)
+}
+
+private val CELL_ALIGN_BOTTOM = ToolCell("下对齐", R.drawable.nds_tile_r3c2) { _, _, align ->
+    align(AlignEdge.BOTTOM_DEVICE)
+}
+
+private val CELL_ALIGN_LEFT = ToolCell("左对齐", R.drawable.nds_tile_r2c1) { _, _, align ->
     align(AlignEdge.LEFT)
-}
-
-private val CELL_FREE_MOVE = ToolCell("自由移动", R.drawable.nds_tile_r2c2) { _, _, align ->
-    align(AlignEdge.CENTER)
-}
-
-private val CELL_GAP_PLUS = ToolCell(
-    "间距调节 100%",
-    R.drawable.nds_tile_r2c4,
-) { vm, s, _ -> nudgeGap(vm, s, +ScreenLayoutManager.GAP_DELTA) }
-
-private val CELL_ORIGINAL_SIZE = ToolCell("Original Size", R.drawable.nds_tile_r3c1) { vm, s, _ ->
-    vm.resetScreenLayoutScreen(s)
-}
-
-private val CELL_ALIGN_BOTTOM = ToolCell("下移", R.drawable.nds_tile_r3c2) { _, _, align ->
-    align(AlignEdge.BOTTOM)
 }
 
 private val CELL_ALIGN_RIGHT = ToolCell("右对齐", R.drawable.nds_tile_align_right) { _, _, align ->
     align(AlignEdge.RIGHT)
 }
 
+private val CELL_FREE_MOVE = ToolCell("居中", R.drawable.nds_tile_r2c2) { _, _, align ->
+    align(AlignEdge.CENTER)
+}
+
 /**
- * Landscape arrangement — the design's 4×3 grid (R1C2 = 宽度100%, R2C3 = 宽度50%,
- * R3C3 = 右对齐, matching the user-pinned cells):
+ * The single screen-gap button (design sheet R3C3 "Screen Gap", glyph `nds_tile_r3c3`:
+ * two bars with a 10px vertical arrow). There is exactly ONE gap button in the toolbox;
+ * tapping cycles the gap: 0 → 16 → 32 → 48 → 0 … device px.
+ */
+private val CELL_GAP = ToolCell("屏幕间距", R.drawable.nds_tile_r3c3) { vm, s, _ -> cycleGap(vm, s) }
+
+private val CELL_ORIGINAL_SIZE = ToolCell("Original Size", R.drawable.nds_tile_r3c1) { vm, s, _ ->
+    vm.resetScreenLayoutScreen(s)
+}
+
+/**
+ * Landscape arrangement — 4 columns × 3 rows. All positions below are CURRENT-layout
+ * coordinates. Design logic (user-pinned): the four directional arrows (↑←→↓) directly
+ * surround the center button, and there is exactly ONE gap button.
  *
- * | R1C1 高度50% | R1C2 宽度100% | R1C3 水平间距− | R1C4 高度100% |
- * | R2C1 左移    | R2C2 自由移动 | R2C3 宽度50%   | R2C4 间距+    |
- * | R3C1 原始尺寸 | R3C2 下移    | R3C3 右对齐     | (空位)        |
+ * | R1C1 高度50%  | R1C2 上对齐↑ | R1C3 高度100% | R1C4 宽度100% ↔100% |
+ * | R2C1 左对齐← | R2C2 居中✛   | R2C3 右对齐→  | R2C4 宽度50%  ↔50%  |
+ * | R3C1 原始尺寸 | R3C2 下对齐↓ | R3C3 间距     | (空位)              |
  */
 private fun toolGridLandscape(width100: ToolCell, width50: ToolCell): Array<Array<ToolCell?>> = arrayOf(
-    arrayOf(CELL_HEIGHT_50, width100, CELL_GAP_MINUS, CELL_HEIGHT_100),
-    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, width50, CELL_GAP_PLUS),
-    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_ALIGN_RIGHT, null),
+    arrayOf(CELL_HEIGHT_50, CELL_ALIGN_TOP, CELL_HEIGHT_100, width100),
+    arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, CELL_ALIGN_RIGHT, width50),
+    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_GAP, null),
 )
 
 /**
- * Portrait arrangement — 4×3. The user-pinned cells (both orientations): R1C2 = 宽度100%,
- * R2C3 = 宽度50%, R3C3 = 右对齐, R4C2 = 底部对齐（贴设备屏底）. R4C3 is empty. The remaining
- * tools keep a sensible grouping around the pinned cells:
+ * Portrait arrangement — 4 rows × 3 columns. All positions below are CURRENT-layout
+ * coordinates. User-pinned: R1C2 = 宽度100%, R2C3 = 宽度50%, R3C3 = 右对齐,
+ * R4C2 = 底部对齐（贴设备屏底）, R4C3 = 间距（唯一间距按钮，图标 tiles/R3C3.svg）.
+ * The four directional arrows (↑ R2C2, ← R3C1, → R3C3, ↓ R4C2) surround the center R3C2.
  *
- * | 高度100% | 宽度100% | 水平间距− |
- * | 高度50%  | 间距+    | 宽度50%   |
- * | 左对齐   | 自由移动 | 右对齐    |
- * | 原始尺寸 | 底部对齐 | (空)      |
+ * | R1C1 高度100% | R1C2 宽度100% | (空位)     |
+ * | R2C1 高度50%  | R2C2 上对齐↑  | R2C3 宽度50% |
+ * | R3C1 左对齐←  | R3C2 居中✛    | R3C3 右对齐→ |
+ * | R4C1 原始尺寸 | R4C2 底部对齐↓ | R4C3 间距   |
  */
 private fun toolGridPortrait(
     width100: ToolCell,
     width50: ToolCell,
-    bottomDevice: ToolCell,
 ): Array<Array<ToolCell?>> = arrayOf(
-    arrayOf(CELL_HEIGHT_100, width100, CELL_GAP_MINUS),
-    arrayOf(CELL_HEIGHT_50, CELL_GAP_PLUS, width50),
+    arrayOf(CELL_HEIGHT_100, width100, null),
+    arrayOf(CELL_HEIGHT_50, CELL_ALIGN_TOP, width50),
     arrayOf(CELL_ALIGN_LEFT, CELL_FREE_MOVE, CELL_ALIGN_RIGHT),
-    arrayOf(CELL_ORIGINAL_SIZE, bottomDevice, null),
+    arrayOf(CELL_ORIGINAL_SIZE, CELL_ALIGN_BOTTOM, CELL_GAP),
 )
 
-/** Applies a gap delta to both screens (the gap is shared between them). */
-private fun nudgeGap(
+/** Gap-cycle step / wrap point for the single gap button (device px). */
+private const val GAP_CYCLE_STEP = 16f
+private const val GAP_CYCLE_MAX = 48f
+
+/** Single gap button action: cycle the shared inter-screen gap 0 → 16 → 32 → 48 → 0 … */
+private fun cycleGap(
     vm: BaseGameScreenViewModel,
     screen: ScreenId,
-    delta: Float,
 ) {
     val current = vm.currentScreenLayoutState().transformOf(screen).gap
-    val next = (current + delta).coerceAtLeast(0f)
+    val next = if (current + GAP_CYCLE_STEP > GAP_CYCLE_MAX) 0f else current + GAP_CYCLE_STEP
     vm.setScreenLayoutGap(ScreenId.TOP, next)
     vm.setScreenLayoutGap(ScreenId.BOTTOM, next)
 }

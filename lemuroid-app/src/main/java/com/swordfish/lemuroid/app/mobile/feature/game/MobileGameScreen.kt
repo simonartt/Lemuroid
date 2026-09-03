@@ -747,9 +747,10 @@ private fun ScreenLayoutEditorOverlay(
             val cy = natural.center.y
             val (ox, oy) =
                 when (edge) {
-                    AlignEdge.TOP -> transform.offsetX to (viewPos.top - (cy - halfH))
-                    // BOTTOM anchors to the game-view anchor; BOTTOM_DEVICE anchors to the
-                    // physical device screen bottom (fullPos.bottom) — portrait R4C2.
+                    // TOP / BOTTOM_DEVICE anchor to the PHYSICAL device screen edges
+                    // (fullPos.top / fullPos.bottom) — the 上对齐/下对齐 arrow buttons.
+                    // LEFT/RIGHT still anchor to the game-view rect (== device width anyway).
+                    AlignEdge.TOP -> transform.offsetX to (fullPos.top - (cy - halfH))
                     AlignEdge.BOTTOM -> transform.offsetX to (viewPos.bottom - (cy + halfH))
                     AlignEdge.BOTTOM_DEVICE -> transform.offsetX to (fullPos.bottom - (cy + halfH))
                     AlignEdge.LEFT -> (viewPos.left - (cx - halfW)) to transform.offsetY
