@@ -69,6 +69,11 @@ class GameViewModelScreenLayout(
         scope.launch { screenLayoutManager.setGap(screen, gap) }
     }
 
+    /** Enables/disables rendering of one screen (visibility switch on the editor frame). */
+    fun setEnabled(screen: ScreenId, enabled: Boolean) {
+        scope.launch { screenLayoutManager.setEnabled(screen, enabled) }
+    }
+
     /** Sets the uniform scale of one screen (zoom-panel steps). */
     fun setScale(screen: ScreenId, scale: Float) {
         scope.launch {

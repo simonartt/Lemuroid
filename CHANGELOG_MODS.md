@@ -6,6 +6,24 @@
 
 ## v1.21 - 2026-09-03
 
+### NDS 编辑器：宽度按钮改相对语义 + 横屏左右对齐修复 + 移除双指捏合 + 全屏钳制 + 每屏启用开关（版本升至 1.20.4-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 269 / versionName 1.20.4 / suffix -v8b**（用户 v1.20.3 实测反馈 + 新功能）:
+
+1. **"宽度50%"=当前宽度减半、"宽度100%"=还原宽度（语义变更）** — 旧实现是"缩放到设备屏宽 50%/100%"（反算等比 scale 的 `setWidthPercent`，已删除）。现直接操作**宽度轴系数 scaleX**：R2C4 每次点按 `scaleX ×= 0.5`（下限 `MIN_AXIS_SCALE=0.1`，可重复逐次减半）；R1C4 `scaleX=1.0` 还原自然宽度。高度/位置不受影响。
+2. **横屏左/右对齐贴设备边（BUG 修复）** — 旧 `alignToEdge` LEFT/RIGHT 锚定 `viewPos`（游戏视图矩形），横屏两侧被虚拟按键占据 → 贴不到设备左边/右边。现与上/下对齐一致锚定 `fullPos`（物理屏边）。同时对齐用的半宽高改从**钳制后可见矩形**取，保证"看到哪贴哪"。
+3. **移除双指捏合缩放（用户未要求过的功能）** — `dragInsideFrame` 里遗留的 `changes.size>=2 → zoomChange` 逻辑删除；改为主指（第一根按下手指）独占平移、其余手指忽略——双指并拢/张开不再改变框大小。缩放唯一入口=缩放模式把手（工具箱按钮/1x–7x 档不受影响）。`onTransform` 签名从 4 参改 3 参。
+4. **缩放/移动限制在设备屏内（钳制）** — `applyScreenLayoutTransform` 新增可选 `deviceBounds`：半宽/半高各封顶设备屏宽高一半、中心钳制使整框不出屏。编辑框、运行时 viewport、把手命中测试**全部经过此钳制**（单一钳制点，任何工具都无法越界）。把手 `dragResizeHandle` 改为**以钳制后的可见框为冻结基准**（k=1 恒等于当前可见尺寸；之前存储值与可见值在触边钳制后会脱节），emit 时双轴尺寸钳制 + 中心钳制回设备矩形内；正常模式拖动同样按可见框中心增量钳制。
+5. **新功能：每屏启用开关（横竖屏通用）** — 选中虚线框后其**左上角**出现 44×22dp 小滑动开关（自绘 `ScreenEnableToggle`，非 m3 Switch，子级 clickable 稳定消费点击）。关闭 → 该屏**真实渲染隐藏**且**不接收触摸**；虚线框仍可点选、开关仍可再开。开关状态存入 `ScreenTransform.enabled`（随槽位保存/载入，默认 true）。全链路：Kotlin `gameView.splitScreenVisible` → JNI `setSplitViewportVisibility` → `LibretroDroid::setSplitViewportVisibility`（状态持有，Video 重建后重放）→ `VideoLayout` 跳过隐藏 quad 的 `glDrawArrays` + `getRelativePosition` 不命中隐藏屏。**子模块 libretrodroid-local 需先推 dualscreen 分支**。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `applyScreenLayoutTransform(+deviceBounds 钳制)`；`dragInsideFrame`（删捏合、主指平移、可见框增量钳制）；`dragResizeHandle`（可见框基准、双轴钳制、中心回算）；`alignToEdge`（LEFT/RIGHT→fullPos、可见半宽高）；`ScreenEnableToggle` 新组件 + 选中框左上角挂载；LaunchedEffect 下发 `splitScreenVisible`；两处 rect 计算传 `fullPos`
+- `lemuroid-app/.../mobile/feature/game/ScreenLayoutEditorToolbox.kt` — width100/width50 改 scaleX 语义（删 `setWidthPercent`/`remember`，新增 `MIN_AXIS_SCALE`）
+- `lemuroid-app/.../shared/game/screenlayout/ScreenLayoutManager.kt` — `ScreenTransform.enabled` 字段 + `setEnabled()`；`isDefault` 计入 enabled
+- `lemuroid-app/.../shared/game/BaseGameScreenViewModel.kt` + `viewmodel/GameViewModelScreenLayout.kt` — `setScreenLayoutEnabled` 转发
+- `libretrodroid-local`（子模块）— `videolayout.h/cpp`（top/bottomScreenVisible + 触摸过滤）、`video.h/cpp`（跳过隐藏 quad 绘制）、`libretrodroid.h/cpp`（状态持有+Video 重建重放）、`libretrodroidjni.cpp` + `LibretroDroid.java`（`setSplitViewportVisibility` 导出）、`GLRetroView.kt`（`splitScreenVisible` 属性）
+- `lemuroid-app/build.gradle.kts` — versionCode 268→269、versionName 1.20.3→1.20.4
+
 ### NDS 编辑器：把手箭头短粗 + 编辑界面隐藏右上☰ + 缩放中可双指平移 + 子菜单固定宽左对齐（版本升至 1.20.3-v8b）
 
 **分支 `v8b-nds-editor`，versionCode 268 / versionName 1.20.3 / suffix -v8b**（用户 v1.20.2 实测反馈）:

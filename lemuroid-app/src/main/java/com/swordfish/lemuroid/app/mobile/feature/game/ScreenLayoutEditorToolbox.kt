@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -74,19 +73,15 @@ fun ScreenLayoutEditorToolbox(
             // drawable FILENAMES preserve the ORIGINAL figma-export sheet position (tiles/RxCy.svg);
             // which cell actually uses a tile is decided by the grid functions below. All cell
             // positions in comments are CURRENT-layout coordinates.
-            // The two width-percent cells need runtime geometry, so they're built here and
-            // injected into the grid layout (remembered on the geometry values).
-            val width100 = remember(displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx) {
-                // ↔100% glyph (sheet name R2C4, but it is the WIDTH 100% icon).
-                ToolCell("宽度 100%", R.drawable.nds_tile_r2c4) { vm, s, _ ->
-                    setWidthPercent(vm, s, 1.0f, displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx)
-                }
+            // v1.20.4 width semantics (user-pinned): "宽度50%" HALVES the CURRENT width
+            // (scaleX × 0.5, repeatable), "宽度100%" RESTORES scaleX to 1.0 — both relative to
+            // the frame's current look, no longer tied to the device-screen width.
+            val width100 = ToolCell("宽度还原 100%", R.drawable.nds_tile_r2c4) { vm, s, _ ->
+                vm.setScreenLayoutHorizontalScale(s, ScreenLayoutManager.HORIZONTAL_SCALE_FULL)
             }
-            val width50 = remember(displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx) {
-                // ↔50% glyph (sheet name R1C3, but it is the WIDTH 50% icon).
-                ToolCell("宽度 50%", R.drawable.nds_tile_r1c3) { vm, s, _ ->
-                    setWidthPercent(vm, s, 0.5f, displayWidthPx, naturalTopWidthPx, naturalBottomWidthPx)
-                }
+            val width50 = ToolCell("宽度减半 50%", R.drawable.nds_tile_r1c3) { vm, s, _ ->
+                val current = vm.currentScreenLayoutState().transformOf(s).scaleX
+                vm.setScreenLayoutHorizontalScale(s, (current * ScreenLayoutManager.HORIZONTAL_SCALE_HALF).coerceAtLeast(MIN_AXIS_SCALE))
             }
             val grid = if (isLandscape) toolGridLandscape(width100, width50) else toolGridPortrait(width100, width50)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -261,26 +256,9 @@ private fun cycleGap(
 }
 
 /**
- * Sets the selected screen's rendered width to [percent] of the device screen width.
- * Rendered width = naturalWidth × scale, so the required uniform scale is
- * percent × displayWidth / naturalWidth. Uniform scale keeps the 4:3 ratio intact.
+ * Minimum per-axis scale (scaleX / scaleY) so a width/height tool can't collapse a frame to 0.
  */
-private fun setWidthPercent(
-    vm: BaseGameScreenViewModel,
-    screen: ScreenId,
-    percent: Float,
-    displayWidthPx: Float,
-    naturalTopWidthPx: Float,
-    naturalBottomWidthPx: Float,
-) {
-    val naturalWidth = if (screen == ScreenId.TOP) naturalTopWidthPx else naturalBottomWidthPx
-    if (naturalWidth <= 0f || displayWidthPx <= 0f) return
-    val targetScale = (percent * displayWidthPx / naturalWidth).coerceIn(
-        ScreenLayoutManager.MIN_SCALE,
-        ScreenLayoutManager.MAX_SCALE,
-    )
-    vm.setScreenLayoutScale(screen, targetScale)
-}
+private const val MIN_AXIS_SCALE = 0.1f
 
 /** Zoom panel: stepped uniform scale of the selected screen. */
 @Composable

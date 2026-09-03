@@ -46,9 +46,14 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         // Gap to the paired screen (pixels). Positive = move away, negative = overlap.
         // In the vertical-stack (portrait) layout this is the vertical spacing between the two screens.
         val gap: Float = 0f,
+        // Per-screen enable (v1.20.4). When false the screen is NOT rendered (its split-viewport
+        // quad is skipped natively) and receives no touch — but its frame stays selectable in
+        // the editor, and swapping the screen positions (R/stick swap) can bring the hidden
+        // content back on screen. Persisted with the layout slots.
+        val enabled: Boolean = true,
     ) {
         val isDefault: Boolean
-            get() = offsetX == 0f && offsetY == 0f && scale == 1.0f && scaleX == 1.0f && scaleY == 1.0f && gap == 0f
+            get() = offsetX == 0f && offsetY == 0f && scale == 1.0f && scaleX == 1.0f && scaleY == 1.0f && gap == 0f && enabled
 
         companion object {
             val DEFAULT = ScreenTransform()
@@ -151,6 +156,14 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         val current = stateFlow.value
         val old = current.transformOf(screen)
         updateState(current.withTransform(screen, old.copy(gap = gap)))
+    }
+
+    /** Enables/disables rendering of one screen (the editor's per-frame visibility switch). */
+    suspend fun setEnabled(screen: ScreenId, enabled: Boolean) {
+        val current = stateFlow.value
+        val old = current.transformOf(screen)
+        if (old.enabled == enabled) return
+        updateState(current.withTransform(screen, old.copy(enabled = enabled)))
     }
 
     /** Saves the current working values into a slot (overwriting whatever was there). */

@@ -210,13 +210,19 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 if (applySplitLayout) {
                     val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, isLandscape)
                     val topRect =
-                        applyScreenLayoutTransform(naturalTop, screenLayout!!.topScreen, gapSign = -1f, isLandscape)
+                        applyScreenLayoutTransform(naturalTop, screenLayout!!.topScreen, gapSign = -1f, isLandscape, fullPos)
                     val bottomRect =
-                        applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen, gapSign = +1f, isLandscape)
+                        applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen, gapSign = +1f, isLandscape, fullPos)
                     val topViewport = normalizeToFullScreen(topRect, fullPos)
                     val bottomViewport = normalizeToFullScreen(bottomRect, fullPos)
                     Timber.d("Setting split viewport: top=$topViewport bottom=$bottomViewport")
                     gameView.splitViewport = topViewport to bottomViewport
+                    // Per-screen visibility (v1.20.4): a disabled screen's quad is skipped by the
+                    // renderer and receives no touch. Both setters queue on the emulation thread
+                    // in order, and splitViewport's own setter re-pushes the saved visibility, so
+                    // the two calls converge regardless of order (also replays after Video rebuild).
+                    gameView.splitScreenVisible =
+                        screenLayout.topScreen.enabled to screenLayout.bottomScreen.enabled
                 } else {
                     val viewport = normalizeToFullScreen(viewPos, fullPos)
                     Timber.d("Setting game viewport: $viewport (customLayout=false)")
@@ -584,36 +590,45 @@ internal fun nativeResolutionScale(naturalWidthPx: Float): Float {
  * Applies a per-screen transform (scale around own center + pixel translation + gap).
  * The gap runs along the stack axis: vertical in portrait (top screen up, bottom down),
  * horizontal in landscape (left screen left, right screen right).
+ *
+ * When [deviceBounds] is non-null the resulting rect is CLAMPED (v1.20.4, user-pinned) so the
+ * frame can never exceed the device screen: each axis' size is capped at the device dimension and
+ * the position is shifted inward so the whole rect stays inside. This is the single choke point
+ * both the editor's dashed frames and the runtime split-viewport pass through, so every tool
+ * (resize handle, width/height, zoom, align) obeys the "stay inside the device screen" rule and
+ * the visible frame always matches the rendered picture.
  */
 private fun applyScreenLayoutTransform(
     base: Rect,
     transform: ScreenLayoutManager.ScreenTransform,
     gapSign: Float = 0f,
     isLandscape: Boolean = false,
+    deviceBounds: Rect? = null,
 ): Rect {
     val centerX = (base.left + base.right) / 2f
     val centerY = (base.top + base.bottom) / 2f
     // Effective width = uniform scale × horizontal (width-axis) scale.
-    val halfWidth = (base.right - base.left) * transform.scale * transform.scaleX / 2f
+    var halfWidth = (base.right - base.left) * transform.scale * transform.scaleX / 2f
     // Effective height = uniform scale × vertical (height-axis) scale.
-    val halfHeight = (base.bottom - base.top) * transform.scale * transform.scaleY / 2f
-    return if (isLandscape) {
-        val gapOffsetX = transform.gap * gapSign
-        Rect(
-            left = centerX - halfWidth + transform.offsetX + gapOffsetX,
-            top = centerY - halfHeight + transform.offsetY,
-            right = centerX + halfWidth + transform.offsetX + gapOffsetX,
-            bottom = centerY + halfHeight + transform.offsetY,
-        )
-    } else {
-        val gapOffsetY = transform.gap * gapSign
-        Rect(
-            left = centerX - halfWidth + transform.offsetX,
-            top = centerY - halfHeight + transform.offsetY + gapOffsetY,
-            right = centerX + halfWidth + transform.offsetX,
-            bottom = centerY + halfHeight + transform.offsetY + gapOffsetY,
-        )
+    var halfHeight = (base.bottom - base.top) * transform.scale * transform.scaleY / 2f
+    var cx = centerX + transform.offsetX
+    var cy = centerY + transform.offsetY
+    // The gap pushes along the stack axis.
+    if (isLandscape) cx += transform.gap * gapSign else cy += transform.gap * gapSign
+    if (deviceBounds != null) {
+        val maxHalfW = deviceBounds.width / 2f
+        val maxHalfH = deviceBounds.height / 2f
+        if (halfWidth > maxHalfW) halfWidth = maxHalfW
+        if (halfHeight > maxHalfH) halfHeight = maxHalfH
+        cx = cx.coerceIn(deviceBounds.left + halfWidth, deviceBounds.right - halfWidth)
+        cy = cy.coerceIn(deviceBounds.top + halfHeight, deviceBounds.bottom - halfHeight)
     }
+    return Rect(
+        left = cx - halfWidth,
+        top = cy - halfHeight,
+        right = cx + halfWidth,
+        bottom = cy + halfHeight,
+    )
 }
 
 /** Normalizes a root-coordinate rect into the GLRetroView's 0..1 viewport space. */
@@ -630,15 +645,18 @@ private fun normalizeToFullScreen(
 }
 
 /** Euclidean distance between two [Offset]s (Compose's Offset has no built-in helper). */
+@Suppress("unused")
 private fun Offset.distanceTo(other: Offset): Float = kotlin.math.hypot(x - other.x, y - other.y)
 
 /**
- * Unified tap + drag/zoom gesture for the editor overlay. A single pointer handler owns ALL
- * touches on the full-screen Box (no competing detectTapGestures — two handlers fighting over
+ * Unified tap + drag gesture for the editor overlay (normal mode). A single pointer handler owns
+ * ALL touches on the full-screen Box (no competing detectTapGestures — two handlers fighting over
  * the same events made drags inside a frame stop working):
  *
- * - Press INSIDE a dashed frame → that screen is selected immediately; if the finger then
- *   moves, a single finger pans it and two fingers pinch-zoom around the midpoint.
+ * - Press INSIDE a dashed frame → that screen is selected immediately; if the finger then moves,
+ *   it PANS the frame. Pinch-zoom was REMOVED (v1.20.4, user-pinned): the ONLY way to resize a
+ *   frame is the corner handle in resize mode. Any additional fingers beyond the first are ignored
+ *   for movement so a two-finger touch simply drags with the dominant (first) finger.
  * - Press OUTSIDE every frame → nothing happens (no selection change, no move).
  */
 private suspend fun PointerInputScope.dragInsideFrame(
@@ -646,7 +664,7 @@ private suspend fun PointerInputScope.dragInsideFrame(
     bottomRectLatest: State<Rect>,
     fullPosLatest: State<Rect?>,
     selectedScreen: MutableState<ScreenLayoutManager.ScreenId>,
-    onTransform: (ScreenLayoutManager.ScreenId, Float, Float, Float) -> Unit,
+    onTransform: (ScreenLayoutManager.ScreenId, Float, Float) -> Unit,
 ) {
     awaitPointerEventScope {
         // Outer loop: after each gesture (or an ignored outside press) keep listening for the
@@ -684,26 +702,28 @@ private suspend fun PointerInputScope.dragInsideFrame(
             if (target == null) continue
             selectedScreen.value = target
 
+            // Track ONLY the dominant (first) finger for panning. No zoom is computed.
+            var dragId: PointerId? = null
             var lastX = pressPos.x
             var lastY = pressPos.y
             while (true) {
                 val event = awaitPointerEvent()
-                if (!event.changes.any { it.pressed }) break // all fingers lifted → end gesture
-                val zoomChange =
-                    if (event.changes.size >= 2) {
-                        val prev = event.changes[0].previousPosition.distanceTo(event.changes[1].previousPosition)
-                        val now = event.changes[0].position.distanceTo(event.changes[1].position)
-                        if (prev > 0f) now / prev else 1f
+                // Lock the drag to whichever finger is the first still-pressed one; later fingers
+                // (a pinch attempt) are ignored entirely, so a two-finger touch pans as one finger.
+                val drag =
+                    if (dragId == null) {
+                        event.changes.firstOrNull { it.pressed }?.also {
+                            dragId = it.id
+                            lastX = it.position.x
+                            lastY = it.position.y
+                        }
                     } else {
-                        1f
+                        event.changes.firstOrNull { it.id == dragId }
                     }
-                val midX = event.changes.first().position.x +
-                    (if (event.changes.size >= 2) (event.changes[1].position.x - event.changes[0].position.x) / 2f else 0f)
-                val midY = event.changes.first().position.y +
-                    (if (event.changes.size >= 2) (event.changes[1].position.y - event.changes[0].position.y) / 2f else 0f)
-                onTransform(target, midX - lastX, midY - lastY, zoomChange)
-                lastX = midX
-                lastY = midY
+                if (drag == null || !drag.pressed) break // dominant finger lifted → end gesture
+                onTransform(target, drag.position.x - lastX, drag.position.y - lastY)
+                lastX = drag.position.x
+                lastY = drag.position.y
             }
         }
     }
@@ -711,18 +731,20 @@ private suspend fun PointerInputScope.dragInsideFrame(
 
 /**
  * Resize-mode gesture: dragging the 50dp handle at the selected frame's bottom-right scales that
- * frame PROPORTIONALLY with its TOP-LEFT corner pinned. Since v1.20.3 a SECOND finger holding a
- * frame body pans the SAME frame while the resize finger keeps scaling — the two contributions are
- * additive: offset = frozen base + resize delta + pan delta.
+ * frame PROPORTIONALLY with its TOP-LEFT corner pinned. A second finger holding the frame body
+ * pans the SAME frame while the resize finger keeps scaling — the two contributions are additive:
+ * offset = frozen base + resize delta + pan delta.
  *
  * Roles: at most one resize finger (must land on the handle) and one pan finger (any frame body).
  * A frame-body press with no resize running behaves like normal mode: select + pan. Presses
  * outside every frame are ignored.
  *
  * Sensitivity: everything is measured against a base FROZEN at first press (t0, hw0, hh0, baseW1)
- * — newScale = t0.scale · (d/ref), 1:1 with finger travel, no per-event compounding — and the
- * effective WIDTH is clamped to the device screen width. When the resize finger lands after a pan
- * started, the existing frozen base is REUSED (no re-freeze) so the scale continues seamlessly.
+ * — newScale = t0.scale · (d/ref), 1:1 with finger travel, no per-event compounding. Clamped
+ * (v1.20.4, user-pinned): BOTH the effective width and height are capped so the frame never
+ * exceeds the DEVICE screen, and the final offset is clamped so the whole frame stays inside the
+ * device bounds. When the resize finger lands after a pan started, the existing frozen base is
+ * REUSED (no re-freeze) so the scale continues seamlessly.
  */
 private suspend fun PointerInputScope.dragResizeHandle(
     selectedScreen: MutableState<ScreenLayoutManager.ScreenId>,
@@ -744,6 +766,12 @@ private suspend fun PointerInputScope.dragResizeHandle(
             var hw0 = 0f
             var hh0 = 0f
             var baseW1 = 0f
+            var cx0 = 0f
+            var cy0 = 0f
+            var natCx0 = 0f
+            var natCy0 = 0f
+            var gapX0 = 0f
+            var gapY0 = 0f
             var kApplied = 1f
             var tlMainAxis = 0f
             var ref = 1f
@@ -757,11 +785,13 @@ private suspend fun PointerInputScope.dragResizeHandle(
                 val event = awaitPointerEvent()
                 val fp = fullPosLatest.value ?: break
                 val layout = layoutStateLatest.value
+                // Hit-test frames are the CLAMPED, visible ones (same deviceBounds the dashed
+                // frames are drawn with), so handle taps land where the frame actually is.
                 val topLocal = applyScreenLayoutTransform(
-                    naturalTopLatest.value, layout.topScreen, gapSign = -1f, isLandscape,
+                    naturalTopLatest.value, layout.topScreen, gapSign = -1f, isLandscape, fp,
                 ).translate(-fp.left, -fp.top)
                 val bottomLocal = applyScreenLayoutTransform(
-                    naturalBottomLatest.value, layout.bottomScreen, gapSign = +1f, isLandscape,
+                    naturalBottomLatest.value, layout.bottomScreen, gapSign = +1f, isLandscape, fp,
                 ).translate(-fp.left, -fp.top)
 
                 // --- assign new presses to roles ---
@@ -775,18 +805,30 @@ private suspend fun PointerInputScope.dragResizeHandle(
                             p.y >= selFrame.bottom - handleSizePx && p.y <= selFrame.bottom
                     if (resizeId == null && onHandle) {
                         resizeId = c.id
-                        // (Re-)freeze the base from the LIVE transform on EVERY handle press, so
-                        // k=1 always means "current size" (a fresh press after a pan+resize must
-                        // not jump back to the original). Accumulated pan is folded into the base.
+                        // (Re-)freeze the base from the LIVE, CLAMPED (visible) frame on EVERY
+                        // handle press, so k=1 always means "current visible size" (a fresh
+                        // press after a pan+resize must not jump back to the original).
                         val s = selectedScreen.value
                         val nat =
                             if (s == ScreenLayoutManager.ScreenId.TOP) naturalTopLatest.value else naturalBottomLatest.value
                         val t = layout.transformOf(s)
-                        val w = nat.width * t.scale * t.scaleX / 2f
-                        val h = nat.height * t.scale * t.scaleY / 2f
+                        // selFrame is the clamped visible rect in LOCAL coords; centre it back
+                        // to root coords for the freeze math.
+                        val selRoot = selFrame.translate(fp.left, fp.top)
+                        val w = selRoot.width / 2f
+                        val h = selRoot.height / 2f
                         if (t.scale <= 0f || w <= 0f || h <= 0f) { resizeId = null; continue }
                         target = s
-                        t0 = t; hw0 = w; hh0 = h; baseW1 = w / t.scale
+                        t0 = t; hw0 = w; hh0 = h
+                        // Unclamped natural half width per uniform scale — used to invert the
+                        // desired visible width back into a stored scale value.
+                        baseW1 = nat.width * t.scaleX / 2f
+                        cx0 = selRoot.center.x
+                        cy0 = selRoot.center.y
+                        natCx0 = nat.center.x
+                        natCy0 = nat.center.y
+                        gapX0 = if (isLandscape) t.gap * (if (s == ScreenLayoutManager.ScreenId.TOP) -1f else 1f) else 0f
+                        gapY0 = if (isLandscape) 0f else t.gap * (if (s == ScreenLayoutManager.ScreenId.TOP) -1f else 1f)
                         kApplied = 1f; panDX = 0f; panDY = 0f
                         // ref/TL measured live from the press, so the first move of a still finger
                         // gives k = 1 (no jump).
@@ -797,18 +839,28 @@ private suspend fun PointerInputScope.dragResizeHandle(
                         panLastX = p.x
                         panLastY = p.y
                         if (t0 == null) {
-                            // Standalone pan: select the pressed frame and freeze it as the base.
+                            // Standalone pan: select the pressed frame and freeze its VISIBLE
+                            // (clamped) rect as the base.
                             val s =
                                 if (topLocal.contains(p)) ScreenLayoutManager.ScreenId.TOP else ScreenLayoutManager.ScreenId.BOTTOM
                             selectedScreen.value = s
                             val nat =
                                 if (s == ScreenLayoutManager.ScreenId.TOP) naturalTopLatest.value else naturalBottomLatest.value
                             val t = layout.transformOf(s)
-                            val w = nat.width * t.scale * t.scaleX / 2f
-                            val h = nat.height * t.scale * t.scaleY / 2f
+                            val frameLocal = if (s == ScreenLayoutManager.ScreenId.TOP) topLocal else bottomLocal
+                            val rootRect = frameLocal.translate(fp.left, fp.top)
+                            val w = rootRect.width / 2f
+                            val h = rootRect.height / 2f
                             if (t.scale <= 0f || w <= 0f || h <= 0f) { panId = null; continue }
                             target = s
-                            t0 = t; hw0 = w; hh0 = h; baseW1 = w / t.scale
+                            t0 = t; hw0 = w; hh0 = h
+                            baseW1 = nat.width * t.scaleX / 2f
+                            cx0 = rootRect.center.x
+                            cy0 = rootRect.center.y
+                            natCx0 = nat.center.x
+                            natCy0 = nat.center.y
+                            gapX0 = if (isLandscape) t.gap * (if (s == ScreenLayoutManager.ScreenId.TOP) -1f else 1f) else 0f
+                            gapY0 = if (isLandscape) 0f else t.gap * (if (s == ScreenLayoutManager.ScreenId.TOP) -1f else 1f)
                             kApplied = 1f; panDX = 0f; panDY = 0f
                         }
                         // If a resize base already exists, the pan just adds to it (same target).
@@ -838,21 +890,35 @@ private suspend fun PointerInputScope.dragResizeHandle(
                 }
                 if (resizeId == null && panId == null) { running = false; break }
 
-                // --- ONE additive emit: frozen base + resize delta + pan delta ---
+                // --- ONE additive emit: frozen VISIBLE base + resize delta + pan delta ---
                 val t = t0
                 val s = target
                 if (t != null && s != null) {
-                    var newScale =
-                        (t.scale * kApplied).coerceIn(ScreenLayoutManager.MIN_SCALE, ScreenLayoutManager.MAX_SCALE)
-                    val effW = 2f * baseW1 * newScale
-                    if (fp.width > 0f && effW > fp.width) {
-                        newScale = (newScale * fp.width / effW).coerceAtLeast(ScreenLayoutManager.MIN_SCALE)
-                    }
-                    val actualK = newScale / t.scale
+                    // k is 1:1 with finger travel from the frozen visible size, capped so the
+                    // frame never exceeds the DEVICE screen in either axis (v1.20.4).
+                    val kMax = minOf(
+                        if (hw0 > 0f) fp.width / (2f * hw0) else Float.MAX_VALUE,
+                        if (hh0 > 0f) fp.height / (2f * hh0) else Float.MAX_VALUE,
+                    )
+                    val kNew = kApplied.coerceAtMost(kMax).coerceAtLeast(0.01f)
+                    val hwN = hw0 * kNew
+                    val hhN = hh0 * kNew
+                    // TL stays pinned while resizing; accumulated pan shifts the whole frame.
+                    var c1x = (cx0 - hw0) + hwN + panDX
+                    var c1y = (cy0 - hh0) + hhN + panDY
+                    // The whole frame must stay inside the device rect.
+                    c1x = c1x.coerceIn(fp.left + hwN, fp.right - hwN)
+                    c1y = c1y.coerceIn(fp.top + hhN, fp.bottom - hhN)
+                    // Invert the desired visible size/position back into stored values:
+                    // visible half = base × scale (scaleX/scaleY are untouched here), and
+                    // center = natural center + offset + gap.
+                    val newScale =
+                        if (baseW1 > 0f) (hwN / baseW1).coerceIn(ScreenLayoutManager.MIN_SCALE, ScreenLayoutManager.MAX_SCALE)
+                        else t.scale
                     onResize(
                         s,
-                        t.offsetX + hw0 * (actualK - 1f) + panDX,
-                        t.offsetY + hh0 * (actualK - 1f) + panDY,
+                        c1x - natCx0 - gapX0,
+                        c1y - natCy0 - gapY0,
                         newScale,
                     )
                 }
@@ -863,7 +929,8 @@ private suspend fun PointerInputScope.dragResizeHandle(
 
 /**
  * Full-screen editor overlay for the NDS dual-screen layout customizer.
- * Shows a dashed frame per screen; tap a frame to select it, drag to move, pinch to zoom.
+ * Shows a dashed frame per screen; tap a frame to select it, drag to move. Resizing happens ONLY
+ * through the corner handle in resize mode (pinch-zoom was removed in v1.20.4).
  * The bottom bar carries 菜单(槽位子菜单) / 重设回默认 / 工具箱开关 / 调整屏幕大小(等比缩放模式).
  */
 @Composable
@@ -897,8 +964,8 @@ private fun ScreenLayoutEditorOverlay(
         // side-by-side in landscape); 1x..7x map to native-resolution multiples via
         // nativeResolutionScale(). The game picture is hidden while editing, so the frames
         // are the single source of truth — no letterbox/aspect-fit indirection that could drift.
-        val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f, isLandscape)
-        val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f, isLandscape)
+        val topRect = applyScreenLayoutTransform(naturalTop, layoutState.topScreen, gapSign = -1f, isLandscape, fullPos)
+        val bottomRect = applyScreenLayoutTransform(naturalBottom, layoutState.bottomScreen, gapSign = +1f, isLandscape, fullPos)
 
         // Stable references for the pointer handlers: keying pointerInput on rects/layoutState
         // (which change every frame while dragging) restarts the gesture detector on each
@@ -914,23 +981,30 @@ private fun ScreenLayoutEditorOverlay(
         val naturalBottomLatest = rememberUpdatedState(naturalBottom)
 
         // Align/center tools need geometry, so compute the target offset here and push it down.
+        // Offsets are ABSOLUTE in the stored space (center = natural center + offset + gap), so
+        // the math anchors on the natural center; the half sizes come from the CLAMPED visible
+        // rects so aligning matches what the user sees. LEFT/RIGHT now anchor to the PHYSICAL
+        // device edges (fullPos) like TOP/BOTTOM_DEVICE — viewPos is narrower in landscape
+        // (virtual pads take side space), which made 左/右对齐 look broken (fixed v1.20.4).
         val alignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit = { screen, edge ->
-            val natural = if (screen == ScreenLayoutManager.ScreenId.TOP) naturalTop else naturalBottom
+            val isTopScreen = screen == ScreenLayoutManager.ScreenId.TOP
+            val visible = if (isTopScreen) topRect else bottomRect
+            val natural = if (isTopScreen) naturalTop else naturalBottom
             val transform = layoutState.transformOf(screen)
-            val halfW = natural.width * transform.scale * transform.scaleX / 2f
-            val halfH = natural.height * transform.scale * transform.scaleY / 2f
-            val cx = natural.center.x
-            val cy = natural.center.y
+            val halfW = visible.width / 2f
+            val halfH = visible.height / 2f
+            val gapSignX = if (isTopScreen) -1f else 1f
+            val gapX = if (isLandscape) transform.gap * gapSignX else 0f
+            val gapY = if (isLandscape) 0f else transform.gap * gapSignX
+            val natCx = natural.center.x
+            val natCy = natural.center.y
             val (ox, oy) =
                 when (edge) {
-                    // TOP / BOTTOM_DEVICE anchor to the PHYSICAL device screen edges
-                    // (fullPos.top / fullPos.bottom) — the 上对齐/下对齐 arrow buttons.
-                    // LEFT/RIGHT still anchor to the game-view rect (== device width anyway).
-                    AlignEdge.TOP -> transform.offsetX to (fullPos.top - (cy - halfH))
-                    AlignEdge.BOTTOM -> transform.offsetX to (viewPos.bottom - (cy + halfH))
-                    AlignEdge.BOTTOM_DEVICE -> transform.offsetX to (fullPos.bottom - (cy + halfH))
-                    AlignEdge.LEFT -> (viewPos.left - (cx - halfW)) to transform.offsetY
-                    AlignEdge.RIGHT -> (viewPos.right - (cx + halfW)) to transform.offsetY
+                    AlignEdge.TOP -> transform.offsetX to (fullPos.top + halfH - natCy - gapY)
+                    AlignEdge.BOTTOM -> transform.offsetX to (viewPos.bottom - halfH - natCy - gapY)
+                    AlignEdge.BOTTOM_DEVICE -> transform.offsetX to (fullPos.bottom - halfH - natCy - gapY)
+                    AlignEdge.LEFT -> (fullPos.left + halfW - natCx - gapX) to transform.offsetY
+                    AlignEdge.RIGHT -> (fullPos.right - halfW - natCx - gapX) to transform.offsetY
                     AlignEdge.CENTER -> 0f to 0f
                 }
             viewModel.setScreenLayoutOffset(screen, ox, oy)
@@ -942,7 +1016,7 @@ private fun ScreenLayoutEditorOverlay(
 
         // Single full-screen Box with ONE pointer handler. The handler is chosen by mode and the
         // block re-runs when [resizeMode] flips (keyed on it) so only one gesture loop is ever live:
-        // - normal mode → dragInsideFrame (tap-to-select + drag/pinch);
+        // - normal mode → dragInsideFrame (tap-to-select + single-finger drag; no pinch zoom);
         // - resize mode → dragResizeHandle (drag the corner handle to scale proportionally).
         // A second detectTapGestures here used to compete for the same events and broke drags — removed.
         Box(
@@ -969,16 +1043,31 @@ private fun ScreenLayoutEditorOverlay(
                                 bottomRectLatest = bottomRectLatest,
                                 fullPosLatest = fullPosLatest,
                                 selectedScreen = selectedScreen,
-                                onTransform = { screen, dx, dy, zoom ->
+                                onTransform = { screen, dx, dy ->
                                     val current = layoutStateLatest.value.transformOf(screen)
+                                    // Pan the VISIBLE (clamped) frame and stay inside the device
+                                    // rect (v1.20.4): map the finger delta onto the clamped center,
+                                    // then convert back to a stored-offset delta so the frame never
+                                    // sticks at an edge while its stored offset drifts off-screen.
+                                    val fp = fullPosLatest.value
+                                    val vis =
+                                        if (screen == ScreenLayoutManager.ScreenId.TOP) topRectLatest.value
+                                        else bottomRectLatest.value
+                                    var ddx = dx
+                                    var ddy = dy
+                                    if (fp != null) {
+                                        val hw = vis.width / 2f
+                                        val hh = vis.height / 2f
+                                        val c1x = (vis.center.x + dx).coerceIn(fp.left + hw, fp.right - hw)
+                                        val c1y = (vis.center.y + dy).coerceIn(fp.top + hh, fp.bottom - hh)
+                                        ddx = c1x - vis.center.x
+                                        ddy = c1y - vis.center.y
+                                    }
                                     viewModel.updateScreenLayoutTransform(
                                         screen,
-                                        current.offsetX + dx,
-                                        current.offsetY + dy,
-                                        (current.scale * zoom).coerceIn(
-                                            ScreenLayoutManager.MIN_SCALE,
-                                            ScreenLayoutManager.MAX_SCALE,
-                                        ),
+                                        current.offsetX + ddx,
+                                        current.offsetY + ddy,
+                                        current.scale,
                                     )
                                 },
                             )
@@ -998,6 +1087,32 @@ private fun ScreenLayoutEditorOverlay(
                     selected = selectedScreen.value == ScreenLayoutManager.ScreenId.BOTTOM,
                     fillColor = NDS_FRAME_FILL_BOTTOM,
                 )
+            }
+
+            // Per-screen enable switch (v1.20.4): a small slide toggle at the TOP-LEFT CORNER of
+            // the SELECTED frame. Off = that screen is not rendered and receives no touch (the
+            // hidden content can still come back via the screen-position swap). The frame stays
+            // selectable while off so the switch can be turned back on.
+            run {
+                val selRect =
+                    if (selectedScreen.value == ScreenLayoutManager.ScreenId.TOP) topRect else bottomRect
+                val selEnabled = layoutState.transformOf(selectedScreen.value).enabled
+                Box(
+                    modifier =
+                        Modifier
+                            .offset {
+                                IntOffset(
+                                    (selRect.left - fullPos.left).toInt(),
+                                    (selRect.top - fullPos.top - 30.dp.toPx()).toInt().coerceAtLeast(0),
+                                )
+                            }
+                            .padding(2.dp),
+                ) {
+                    ScreenEnableToggle(
+                        enabled = selEnabled,
+                        onToggle = { viewModel.setScreenLayoutEnabled(selectedScreen.value, it) },
+                    )
+                }
             }
 
             // Proportional-resize handle: in resize mode a 50dp square sits INSIDE the selected
@@ -1127,6 +1242,39 @@ private fun DrawScope.drawScreenFrame(
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 14f)),
             ),
     )
+}
+
+/**
+ * Tiny pill slide-switch drawn over a selected editor frame's top-left corner (v1.20.4).
+ * ON = the screen renders; OFF = the screen's quad is skipped natively (hidden, untouchable).
+ * Custom (not Material3 Switch) so it stays small and its tap is consumed reliably — a child
+ * composable with `.clickable` wins the pointer contest over the parent's raw pointerInput loop.
+ */
+@Composable
+private fun ScreenEnableToggle(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .size(44.dp, 22.dp)
+                .background(
+                    if (enabled) Color(0xFF35b5e8) else Color(0xFF606066),
+                    RoundedCornerShape(11.dp),
+                )
+                .border(1.5.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(11.dp))
+                .clickable { onToggle(!enabled) },
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .align(if (enabled) Alignment.CenterEnd else Alignment.CenterStart)
+                    .padding(2.dp)
+                    .size(18.dp)
+                    .background(Color.White, CircleShape),
+        )
+    }
 }
 
 /**

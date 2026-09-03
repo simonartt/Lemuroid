@@ -318,6 +318,10 @@ class BaseGameScreenViewModel(
     fun setScreenLayoutScale(screen: ScreenLayoutManager.ScreenId, scale: Float) =
         screenLayout.setScale(screen, scale)
 
+    /** Enables/disables rendering of one screen (per-frame visibility switch). */
+    fun setScreenLayoutEnabled(screen: ScreenLayoutManager.ScreenId, enabled: Boolean) =
+        screenLayout.setEnabled(screen, enabled)
+
     /** Saves the current working layout into a slot (orientation + 1..3). */
     fun saveScreenLayoutToSlot(orientation: ScreenLayoutManager.Orientation, slotNumber: Int) =
         screenLayout.saveToSlot(orientation, slotNumber)
