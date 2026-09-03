@@ -64,7 +64,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerInputScope
-import androidx.compose.ui.input.pointer.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
@@ -615,13 +614,16 @@ private fun normalizeToFullScreen(
     )
 }
 
+/** Euclidean distance between two [Offset]s (Compose's Offset has no built-in helper). */
+private fun Offset.distanceTo(other: Offset): Float = kotlin.math.hypot(x - other.x, y - other.y)
+
 /**
  * Drag/zoom gesture that only engages when the initial press lands INSIDE one of the dashed
  * frames. The pressed frame's screen becomes the target; a single finger pans it and two
  * fingers pinch-zoom it around the midpoint. Pressing outside every frame does nothing — the
  * touch is released without moving any screen (bug1: 框外触摸移动不响应).
  */
-private fun PointerInputScope.dragInsideFrame(
+private suspend fun PointerInputScope.dragInsideFrame(
     topRectLatest: State<Rect>,
     bottomRectLatest: State<Rect>,
     fullPosLatest: State<Rect?>,
