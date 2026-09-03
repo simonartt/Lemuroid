@@ -1,6 +1,7 @@
 package com.swordfish.lemuroid.app.shared.game.viewmodel
 
 import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager
+import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager.Orientation
 import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager.ScreenId
 import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager.ScreenLayoutState
 import kotlinx.coroutines.CoroutineScope
@@ -32,6 +33,7 @@ class GameViewModelScreenLayout(
 
     fun currentLayoutState(): ScreenLayoutState = screenLayoutManager.currentState()
 
+    /** Replaces a screen's transform wholesale (offset + uniform scale). Used by drag and the resize handle. */
     fun updateTransform(screen: ScreenId, offsetX: Float, offsetY: Float, scale: Float) {
         val old = screenLayoutManager.currentState().transformOf(screen)
         scope.launch {
@@ -74,21 +76,23 @@ class GameViewModelScreenLayout(
         }
     }
 
-    fun saveAsNewProfile(name: String) {
-        scope.launch { screenLayoutManager.saveAsNewProfile(name) }
+    /** Saves the current working values into a slot (orientation + 1..3). */
+    fun saveToSlot(orientation: Orientation, slotNumber: Int) {
+        scope.launch { screenLayoutManager.saveToSlot(orientation, slotNumber) }
     }
 
-    fun overwriteActiveProfile(newName: String? = null) {
-        scope.launch { screenLayoutManager.overwriteActiveProfile(newName) }
+    /** Loads a slot's saved values into the working area. */
+    fun loadFromSlot(orientation: Orientation, slotNumber: Int) {
+        scope.launch { screenLayoutManager.loadFromSlot(orientation, slotNumber) }
     }
 
-    fun selectProfile(id: String) {
-        scope.launch { screenLayoutManager.selectProfile(id) }
+    /** Auto-loads the new orientation's last-used slot on rotation (no-op if none saved). */
+    fun onOrientationChanged(orientation: Orientation) {
+        scope.launch { screenLayoutManager.onOrientationChanged(orientation) }
     }
 
-    fun deleteProfile(id: String) {
-        scope.launch { screenLayoutManager.deleteProfile(id) }
-    }
+    /** Human label for the active slot (e.g. "横·槽2"), or null when not loaded from a slot. */
+    fun activeSlotLabel(): String? = screenLayoutManager.activeSlotLabel()
 
     fun resetScreen(screen: ScreenId) {
         scope.launch { screenLayoutManager.resetScreen(screen) }
@@ -97,6 +101,4 @@ class GameViewModelScreenLayout(
     fun resetToDefault() {
         scope.launch { screenLayoutManager.resetToDefault() }
     }
-
-    fun suggestProfileName(): String = screenLayoutManager.suggestProfileName()
 }

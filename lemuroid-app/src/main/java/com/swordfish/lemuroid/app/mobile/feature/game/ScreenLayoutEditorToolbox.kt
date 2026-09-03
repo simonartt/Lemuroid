@@ -353,8 +353,12 @@ private fun ZoomPanel(
 }
 
 /**
- * Bottom action bar — design §5, exactly five items:
- * 菜单 / 重设回默认 / 编辑全局布局(禁用) / 关闭工具箱·打开工具箱(切换) / 调整屏幕大小.
+ * Bottom action bar — four items (v1.20.1):
+ * 菜单(弹下级菜单) / 重设回默认 / 关闭工具箱·打开工具箱(切换) /
+ * 调整屏幕大小 ⇄ 返回(缩放模式开关，第一次点击进缩放模式、文案变"返回"，再点退出).
+ * The old disabled "编辑全局布局" grey placeholder was removed (never had a function);
+ * "调整屏幕大小" no longer exits the editor — exiting moved into the 菜单 sub-menu
+ * ("返回游戏菜单" = close editor + open game menu).
  */
 @Composable
 fun ScreenLayoutBottomBar(
@@ -363,6 +367,9 @@ fun ScreenLayoutBottomBar(
     isLandscape: Boolean,
     toolboxVisible: Boolean,
     onToggleToolbox: () -> Unit,
+    resizeMode: Boolean,
+    onToggleResizeMode: () -> Unit,
+    onMenu: () -> Unit,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -375,15 +382,16 @@ fun ScreenLayoutBottomBar(
                     .padding(vertical = if (isLandscape) 8.dp else 6.dp),
             horizontalArrangement = Arrangement.SpaceAround,
         ) {
-            BottomBarItem("菜单", enabled = true) { viewModel.showGameMenu() }
+            BottomBarItem("菜单", enabled = true) { onMenu() }
             BottomBarItem("重设回默认", enabled = true) { viewModel.resetScreenLayoutToDefault() }
-            // Reserved global-layout entry — disabled per design (rgba(255,255,255,0.4)).
-            BottomBarItem("编辑全局布局", enabled = false) {}
             BottomBarItem(
                 label = if (toolboxVisible) "关闭工具箱" else "打开工具箱",
                 enabled = true,
             ) { onToggleToolbox() }
-            BottomBarItem("调整屏幕大小", enabled = true) { viewModel.toggleEditScreenLayout(false) }
+            BottomBarItem(
+                label = if (resizeMode) "返回" else "调整屏幕大小",
+                enabled = true,
+            ) { onToggleResizeMode() }
         }
     }
 }

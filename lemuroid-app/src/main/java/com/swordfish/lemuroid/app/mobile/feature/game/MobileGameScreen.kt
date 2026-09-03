@@ -5,6 +5,7 @@ package com.swordfish.lemuroid.app.mobile.feature.game
 import android.graphics.RectF
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -47,7 +49,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +72,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -110,6 +112,15 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                     TouchControllerSettingsManager.Orientation.PORTRAIT
                 }
             viewModel.onScreenOrientationChanged(orientation)
+            // NDS layouts are stored per-orientation (3 slots each): on rotation, auto-load the
+            // new orientation's last-used slot if one exists (no-op otherwise).
+            viewModel.onScreenLayoutOrientationChanged(
+                if (isLandscape) {
+                    ScreenLayoutManager.Orientation.LANDSCAPE
+                } else {
+                    ScreenLayoutManager.Orientation.PORTRAIT
+                },
+            )
         }
 
         val controllerConfigState = viewModel.getTouchControllerConfig().collectAsState(null)
@@ -695,9 +706,108 @@ private suspend fun PointerInputScope.dragInsideFrame(
 }
 
 /**
+ * Proportional-resize gesture (resize mode). Pressing INSIDE a frame selects that screen, then
+ * dragging scales it PROPORTIONALLY with its TOP-LEFT corner pinned (user-pinned anchor): the
+ * pointer's distance from the pinned top-left along the DOMINANT axis sets the new size, so both
+ * width and height grow/shrink together. Pressing outside every frame does nothing.
+ *
+ * Math (Box-local space): the frame's current top-left corner TL is read from the LIVE layout
+ * transform (it already includes offset + gap), and (hw, hh) are its effective half-size =
+ * natural · scale · scaleX(Y) / 2. A press at distance d0 from TL on the dominant axis
+ * (x in portrait, y in landscape) is the per-gesture reference; each move to distance d gives
+ * k = d/d0 (so the first move event with a still finger is k = 1, i.e. no jump). newScale =
+ * scale·k. The offsets are then shifted by hw·(k−1) / hh·(k−1) so TL never moves while the
+ * width and height scale together.
+ */
+private suspend fun PointerInputScope.dragResizeHandle(
+    selectedScreen: MutableState<ScreenLayoutManager.ScreenId>,
+    naturalTopLatest: State<Rect>,
+    naturalBottomLatest: State<Rect>,
+    fullPosLatest: State<Rect?>,
+    layoutStateLatest: State<ScreenLayoutManager.ScreenLayoutState>,
+    isLandscape: Boolean,
+    onResize: (ScreenLayoutManager.ScreenId, Float, Float, Float) -> Unit,
+) {
+    awaitPointerEventScope {
+        while (true) {
+            var press: Offset? = null
+            while (press == null) {
+                val ev = awaitPointerEvent()
+                for (c in ev.changes) {
+                    if (c.changedToDown() && !c.isConsumed) {
+                        press = c.position
+                        break
+                    }
+                }
+            }
+            val pressPos = press
+            val fp = fullPosLatest.value ?: continue
+            val layout = layoutStateLatest.value
+            // Hit test uses the CURRENT (transformed) frame rects, in Box-local space.
+            val topRectLocal =
+                applyScreenLayoutTransform(naturalTopLatest.value, layout.topScreen, gapSign = -1f, isLandscape)
+                    .translate(-fp.left, -fp.top)
+            val bottomRectLocal =
+                applyScreenLayoutTransform(
+                    naturalBottomLatest.value,
+                    layout.bottomScreen,
+                    gapSign = +1f,
+                    isLandscape,
+                ).translate(-fp.left, -fp.top)
+            val target =
+                when {
+                    topRectLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.TOP
+                    bottomRectLocal.contains(pressPos) -> ScreenLayoutManager.ScreenId.BOTTOM
+                    else -> null // outside every frame: ignore this gesture
+                }
+            if (target == null) continue
+            selectedScreen.value = target
+
+            // Pinned anchor = the selected frame's current top-left corner (includes offset/gap).
+            val natural =
+                if (target == ScreenLayoutManager.ScreenId.TOP) naturalTopLatest.value else naturalBottomLatest.value
+            val frame = if (target == ScreenLayoutManager.ScreenId.TOP) topRectLocal else bottomRectLocal
+            val tlx = frame.left
+            val tly = frame.top
+            // Dominant axis: width in portrait, height in landscape.
+            val dominantX = !isLandscape
+            val tlAxis = if (dominantX) tlx else tly
+            // Reference distance on the dominant axis from the pinned top-left to the press.
+            val ref =
+                if (dominantX) pressPos.x - tlAxis else pressPos.y - tlAxis
+            if (ref <= 0f) continue // press landed exactly on the pinned edge: nothing to measure
+
+            while (true) {
+                val event = awaitPointerEvent()
+                if (!event.changes.any { it.pressed }) break // all fingers lifted → end gesture
+                val pos = event.changes.first().position
+                val d = if (dominantX) pos.x - tlAxis else pos.y - tlAxis
+                if (d <= 0f) continue
+                // Re-read the live transform: a previous event in this gesture already updated it.
+                val t = layoutStateLatest.value.transformOf(target)
+                val hw = natural.width * t.scale * t.scaleX / 2f
+                val hh = natural.height * t.scale * t.scaleY / 2f
+                if (hw <= 0f || hh <= 0f) break
+                val k = (d / ref).coerceIn(0.1f, 10f)
+                val newScale = (t.scale * k).coerceIn(ScreenLayoutManager.MIN_SCALE, ScreenLayoutManager.MAX_SCALE)
+                // Apply the ACTUAL factor (clamping may have reduced k) and shift the offsets by
+                // hw·(k−1) / hh·(k−1) so the top-left corner of the frame never moves.
+                val kApplied = newScale / t.scale
+                onResize(
+                    target,
+                    t.offsetX + hw * (kApplied - 1f),
+                    t.offsetY + hh * (kApplied - 1f),
+                    newScale,
+                )
+            }
+        }
+    }
+}
+
+/**
  * Full-screen editor overlay for the NDS dual-screen layout customizer.
  * Shows a dashed frame per screen; tap a frame to select it, drag to move, pinch to zoom.
- * The bottom card mirrors the selection and offers sliders plus profile management.
+ * The bottom bar carries 菜单(槽位子菜单) / 重设回默认 / 工具箱开关 / 调整屏幕大小(等比缩放模式).
  */
 @Composable
 private fun ScreenLayoutEditorOverlay(
@@ -712,6 +822,12 @@ private fun ScreenLayoutEditorOverlay(
     // The toolbox starts HIDDEN when the editor opens; the "打开工具箱" item in the bottom
     // bar shows it, and "关闭工具箱" hides it again (design §7.5).
     val toolboxVisible = remember { mutableStateOf(false) }
+    // Proportional-resize mode: toggled by the bottom-bar "调整屏幕大小/返回" item. When on, a
+    // 50dp handle appears at the selected frame's BOTTOM-RIGHT corner; dragging it scales the
+    // frame proportionally with its TOP-LEFT corner pinned (user-pinned anchor).
+    val resizeMode = remember { mutableStateOf(false) }
+    // The "菜单" sub-menu (save/load slots + return to game menu) is opened from the bottom bar.
+    val menuOpen = remember { mutableStateOf(false) }
 
     if (fullPos != null && viewPos != null) {
         val isLandscape = screenWidthPx > screenHeightPx
@@ -736,6 +852,9 @@ private fun ScreenLayoutEditorOverlay(
         val fullPosLatest = rememberUpdatedState(fullPos)
         val layoutStateLatest = rememberUpdatedState(layoutState)
         val viewPosLatest = rememberUpdatedState(viewPos)
+        // The natural rects are needed by the proportional-resize handler; read live through state.
+        val naturalTopLatest = rememberUpdatedState(naturalTop)
+        val naturalBottomLatest = rememberUpdatedState(naturalBottom)
 
         // Align/center tools need geometry, so compute the target offset here and push it down.
         val alignToEdge: (ScreenLayoutManager.ScreenId, AlignEdge) -> Unit = { screen, edge ->
@@ -760,33 +879,48 @@ private fun ScreenLayoutEditorOverlay(
             viewModel.setScreenLayoutOffset(screen, ox, oy)
         }
 
-        // Single full-screen Box with ONE pointer handler: dragInsideFrame handles both
-        // tap-to-select (press inside a frame selects it) and drag/pinch (move to pan, two
-        // fingers to zoom). Pressing outside every frame does nothing. A second detectTapGestures
-        // here used to compete for the same events and broke drags inside frames — removed.
+        // Single full-screen Box with ONE pointer handler. The handler is chosen by mode and the
+        // block re-runs when [resizeMode] flips (keyed on it) so only one gesture loop is ever live:
+        // - normal mode → dragInsideFrame (tap-to-select + drag/pinch);
+        // - resize mode → dragResizeHandle (drag the corner handle to scale proportionally).
+        // A second detectTapGestures here used to compete for the same events and broke drags — removed.
         Box(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
-                        dragInsideFrame(
-                            topRectLatest = topRectLatest,
-                            bottomRectLatest = bottomRectLatest,
-                            fullPosLatest = fullPosLatest,
-                            selectedScreen = selectedScreen,
-                            onTransform = { screen, dx, dy, zoom ->
-                                val current = layoutStateLatest.value.transformOf(screen)
-                                viewModel.updateScreenLayoutTransform(
-                                    screen,
-                                    current.offsetX + dx,
-                                    current.offsetY + dy,
-                                    (current.scale * zoom).coerceIn(
-                                        ScreenLayoutManager.MIN_SCALE,
-                                        ScreenLayoutManager.MAX_SCALE,
-                                    ),
-                                )
-                            },
-                        )
+                    .pointerInput(resizeMode.value) {
+                        if (resizeMode.value) {
+                            dragResizeHandle(
+                                selectedScreen = selectedScreen,
+                                naturalTopLatest = naturalTopLatest,
+                                naturalBottomLatest = naturalBottomLatest,
+                                fullPosLatest = fullPosLatest,
+                                layoutStateLatest = layoutStateLatest,
+                                isLandscape = isLandscape,
+                                onResize = { screen, ox, oy, scale ->
+                                    viewModel.updateScreenLayoutTransform(screen, ox, oy, scale)
+                                },
+                            )
+                        } else {
+                            dragInsideFrame(
+                                topRectLatest = topRectLatest,
+                                bottomRectLatest = bottomRectLatest,
+                                fullPosLatest = fullPosLatest,
+                                selectedScreen = selectedScreen,
+                                onTransform = { screen, dx, dy, zoom ->
+                                    val current = layoutStateLatest.value.transformOf(screen)
+                                    viewModel.updateScreenLayoutTransform(
+                                        screen,
+                                        current.offsetX + dx,
+                                        current.offsetY + dy,
+                                        (current.scale * zoom).coerceIn(
+                                            ScreenLayoutManager.MIN_SCALE,
+                                            ScreenLayoutManager.MAX_SCALE,
+                                        ),
+                                    )
+                                },
+                            )
+                        }
                     },
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -802,6 +936,39 @@ private fun ScreenLayoutEditorOverlay(
                     selected = selectedScreen.value == ScreenLayoutManager.ScreenId.BOTTOM,
                     fillColor = NDS_FRAME_FILL_BOTTOM,
                 )
+            }
+
+            // Proportional-resize handle: in resize mode it sits at the SELECTED frame's
+            // bottom-right corner (50dp square, ↘ arrow). Dragging it scales the frame with its
+            // top-left corner pinned. Tapping a frame selects it; tap again to drag the handle.
+            if (resizeMode.value) {
+                val selRect =
+                    if (selectedScreen.value == ScreenLayoutManager.ScreenId.TOP) topRect else bottomRect
+                Box(
+                    modifier = Modifier
+                        .offset(
+                            IntOffset(
+                                (selRect.right - fullPos.left).toInt(),
+                                (selRect.bottom - fullPos.top).toInt(),
+                            ),
+                        )
+                        .size(50.dp)
+                        .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(6.dp))
+                        .border(2.dp, Color(0xFF35b5e8), RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // ↘ double-arrow drawn with Canvas (Icons.Default.SouthEast is not in core icons).
+                    Canvas(modifier = Modifier.size(28.dp)) {
+                        val p = 4f.toPx()
+                        val corner = size.minDimension - p
+                        val lineColor = Color.Black
+                        drawLine(lineColor, Offset(p, p), Offset(corner, corner), strokeWidth = 3f.toPx())
+                        // Arrowhead at the bottom-right tip: two short strokes back toward center.
+                        val head = 9f.toPx()
+                        drawLine(lineColor, Offset(corner - head, corner), Offset(corner, corner), strokeWidth = 3f.toPx())
+                        drawLine(lineColor, Offset(corner, corner - head), Offset(corner, corner), strokeWidth = 3f.toPx())
+                    }
+                }
             }
 
             if (toolboxVisible.value) {
@@ -827,7 +994,32 @@ private fun ScreenLayoutEditorOverlay(
                 isLandscape = isLandscape,
                 toolboxVisible = toolboxVisible.value,
                 onToggleToolbox = { toolboxVisible.value = !toolboxVisible.value },
+                resizeMode = resizeMode.value,
+                onToggleResizeMode = {
+                    // Entering resize mode hides the toolbox (the handle replaces it); leaving
+                    // restores whatever state the toolbox was in.
+                    val next = !resizeMode.value
+                    resizeMode.value = next
+                    if (next) toolboxVisible.value = false
+                },
+                onMenu = { menuOpen.value = true },
             )
+
+            // "菜单" sub-menu: save/load the current layout into a slot + return to game menu.
+            if (menuOpen.value) {
+                ScreenLayoutSubmenu(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    viewModel = viewModel,
+                    layoutState = layoutState,
+                    isLandscape = isLandscape,
+                    onDismiss = { menuOpen.value = false },
+                    onReturnToGameMenu = {
+                        menuOpen.value = false
+                        viewModel.toggleEditScreenLayout(false)
+                        viewModel.showGameMenu()
+                    },
+                )
+            }
         }
     }
 }
@@ -891,6 +1083,108 @@ private fun DraggableMenuButton(viewModel: BaseGameScreenViewModel) {
                     tint = Color.White.copy(alpha = 0.8f),
                     modifier = Modifier.align(Alignment.Center).size(24.dp),
                 )
+            }
+        }
+    }
+}
+
+/**
+ * "菜单" sub-menu of the layout editor (bottom-bar first item). A dark card listing:
+ *  - a read-only "现在布局：横·槽2 / 默认（未保存）" line showing where the current values came from;
+ *  - for each slot of the CURRENT orientation: 保存为 槽N (overwrite) and 载入 槽N
+ *    (disabled while the slot is empty); the active slot row is highlighted;
+ *  - 返回游戏菜单 (close the editor and open the game menu).
+ * Layouts are GLOBAL across NDS games and split by orientation (Plan A: 竖/横各 3 槽).
+ */
+@Composable
+private fun ScreenLayoutSubmenu(
+    modifier: Modifier = Modifier,
+    viewModel: BaseGameScreenViewModel,
+    layoutState: ScreenLayoutManager.ScreenLayoutState,
+    isLandscape: Boolean,
+    onDismiss: () -> Unit,
+    onReturnToGameMenu: () -> Unit,
+) {
+    val orientation =
+        if (isLandscape) ScreenLayoutManager.Orientation.LANDSCAPE else ScreenLayoutManager.Orientation.PORTRAIT
+    val dir = if (isLandscape) "横" else "竖"
+    val activeLabel = viewModel.currentScreenLayoutSlotLabel()
+    Surface(
+        modifier = modifier.fillMaxWidth().clickable { /* swallow taps so the editor underneath never drags */ },
+        color = Color(0xFF252528),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "保存 / 载入布局（$dir版 · 全局）",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                TextButton(onClick = onDismiss) {
+                    Text("关闭", color = Color(0xFF35b5e8), fontSize = 12.sp)
+                }
+            }
+            Text(
+                text = "现在布局：${activeLabel ?: "默认（未保存）"}",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 12.sp,
+            )
+            for (n in 1..ScreenLayoutManager.SLOTS_PER_ORIENTATION) {
+                val key = ScreenLayoutManager.slotKey(orientation, n)
+                val occupied = layoutState.slots.containsKey(key)
+                val active = layoutState.activeSlot == key
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (active) {
+                                    Modifier.background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+                                } else {
+                                    Modifier
+                                },
+                            )
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (occupied) "槽$n ●" else "槽$n",
+                        color = if (active) Color(0xFF35b5e8) else Color.White,
+                        fontSize = 13.sp,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { viewModel.saveScreenLayoutToSlot(orientation, n) }) {
+                            Text("保存", color = Color.White, fontSize = 12.sp)
+                        }
+                        TextButton(
+                            enabled = occupied,
+                            onClick = { viewModel.loadScreenLayoutFromSlot(orientation, n) },
+                        ) {
+                            Text(
+                                "载入",
+                                color = if (occupied) Color.White else Color.White.copy(alpha = 0.35f),
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                TextButton(onClick = onReturnToGameMenu) {
+                    Text("返回游戏菜单", color = Color.White, fontSize = 13.sp)
+                }
             }
         }
     }

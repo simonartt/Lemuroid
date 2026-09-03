@@ -11,29 +11,38 @@ import kotlinx.serialization.json.Json
 import timber.log.Timber
 
 /**
- * Persists NDS dual-screen layout customization (per-screen offset/scale) and named profiles.
+ * Persists NDS dual-screen layout customization (per-screen offset/scale) in fixed slots.
  * Follows the same pattern as TouchControllerSettingsManager: JSON blob in SharedPreferences
  * backed by an in-memory MutableStateFlow cache.
  *
- * Each screen (top/bottom half of the frame) has its own transform, applied independently.
- * Offsets are in pixels relative to the screen's natural (centered, stacked) position.
- * Scale is a multiplier around the screen's own center. 1.0 = original size.
+ * Storage model (v1.20.1, user-pinned "Plan A"): layouts are GLOBAL across all NDS games and
+ * split by orientation — 3 slots for portrait + 3 for landscape. The [slots] map is keyed by
+ * "[orientation]_[n]" (e.g. "portrait_1"). [topScreen]/[bottomScreen] hold the CURRENT working
+ * values (what is on screen right now); [activeSlot] records which slot they were loaded from
+ * so the UI can show "现在布局：横·槽2". On orientation change the manager auto-loads that
+ * orientation's last-used slot if one exists.
  */
 class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
 
     enum class ScreenId { TOP, BOTTOM }
 
+    enum class Orientation { PORTRAIT, LANDSCAPE }
+
+    /** Number of saved slots per orientation (user-pinned: 3). */
+    const val SLOTS_PER_ORIENTATION = 3
+
     @Serializable
     data class ScreenTransform(
         val offsetX: Float = 0f,
         val offsetY: Float = 0f,
-        // Uniform (equal-proportion) scale, driven by the zoom panel (1x..7x). 1.0 = original.
+        // Uniform (equal-proportion) scale, driven by the zoom panel (1x..7x) and the
+        // proportional-resize handle. 1.0 = original.
         val scale: Float = 1.0f,
         // Horizontal (width-axis) scale, independent of [scale]. 1.0 = original width.
-        // Driven by "宽度 50%/100%" tools (R1C3 / R2C4). effectiveWidth = base * scale * scaleX.
+        // Driven by "宽度 50%/100%" tools. effectiveWidth = base * scale * scaleX.
         val scaleX: Float = 1.0f,
         // Vertical (height-axis) scale, independent of [scale]. 1.0 = original height.
-        // Driven by "高度 50%/100%" tools (R1C1 / R1C4). effectiveHeight = base * scale * scaleY.
+        // Driven by "高度 50%/100%" tools. effectiveHeight = base * scale * scaleY.
         val scaleY: Float = 1.0f,
         // Gap to the paired screen (pixels). Positive = move away, negative = overlap.
         // In the vertical-stack (portrait) layout this is the vertical spacing between the two screens.
@@ -47,31 +56,21 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         }
     }
 
+    /** A saved layout: one transform per screen, stored under a slot key. */
     @Serializable
-    data class ScreenLayoutProfile(
-        val name: String,
+    data class Slot(
         val topScreen: ScreenTransform = ScreenTransform.DEFAULT,
         val bottomScreen: ScreenTransform = ScreenTransform.DEFAULT,
-        // Legacy v1.2 combined transform, migrated into per-screen values on load
-        val offsetX: Float = 0f,
-        val offsetY: Float = 0f,
-        val scale: Float = 1.0f,
     )
 
     @Serializable
     data class ScreenLayoutState(
         val topScreen: ScreenTransform = ScreenTransform.DEFAULT,
         val bottomScreen: ScreenTransform = ScreenTransform.DEFAULT,
-        val profiles: Map<String, ScreenLayoutProfile> = emptyMap(),
-        val activeProfileId: String? = null,
-        // Legacy v1.2 combined transform, migrated into per-screen values on load
-        val offsetX: Float = 0f,
-        val offsetY: Float = 0f,
-        val scale: Float = 1.0f,
+        // Keyed by slotKey(orientation, n). Legacy "profiles" blobs are ignored on load.
+        val slots: Map<String, Slot> = emptyMap(),
+        val activeSlot: String? = null,
     ) {
-        val isDefault: Boolean
-            get() = topScreen.isDefault && bottomScreen.isDefault
-
         fun transformOf(screen: ScreenId): ScreenTransform =
             if (screen == ScreenId.TOP) topScreen else bottomScreen
 
@@ -134,6 +133,13 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         updateState(current.withTransform(screen, old.copy(scaleY = scaleY)))
     }
 
+    /** Sets the uniform scale of one screen (zoom-panel steps / proportional-resize handle). */
+    suspend fun setUniformScale(screen: ScreenId, scale: Float) {
+        val current = stateFlow.value
+        val old = current.transformOf(screen)
+        updateState(current.withTransform(screen, old.copy(scale = scale)))
+    }
+
     /** Sets the absolute pixel offset of one screen relative to its natural center. */
     suspend fun setOffset(screen: ScreenId, offsetX: Float, offsetY: Float) {
         val current = stateFlow.value
@@ -148,95 +154,85 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         updateState(current.withTransform(screen, old.copy(gap = gap)))
     }
 
-    /** Saves current working values as a new profile. Returns the new profile id. */
-    suspend fun saveAsNewProfile(name: String): String {
+    /** Saves the current working values into a slot (overwriting whatever was there). */
+    suspend fun saveToSlot(orientation: Orientation, slotNumber: Int) {
+        val key = slotKey(orientation, slotNumber)
         val current = stateFlow.value
-        val newId = nextProfileId(current.profiles)
-        val profile = ScreenLayoutProfile(name, current.topScreen, current.bottomScreen)
         updateState(
             current.copy(
-                profiles = current.profiles + (newId to profile),
-                activeProfileId = newId,
-            ),
-        )
-        return newId
-    }
-
-    /** Overwrites the active profile with current working values, optionally renaming it. */
-    suspend fun overwriteActiveProfile(newName: String? = null) {
-        val current = stateFlow.value
-        val activeId = current.activeProfileId ?: return
-        val existing = current.profiles[activeId] ?: return
-        val updated =
-            existing.copy(
-                name = newName ?: existing.name,
-                topScreen = current.topScreen,
-                bottomScreen = current.bottomScreen,
-            )
-        updateState(current.copy(profiles = current.profiles + (activeId to updated)))
-    }
-
-    /** Switches to a saved profile; working values are replaced by the profile's values. */
-    suspend fun selectProfile(id: String) {
-        val current = stateFlow.value
-        val profile = current.profiles[id] ?: return
-        updateState(
-            current.copy(
-                topScreen = profile.topScreen,
-                bottomScreen = profile.bottomScreen,
-                activeProfileId = id,
+                slots = current.slots + (key to Slot(current.topScreen, current.bottomScreen)),
+                activeSlot = key,
             ),
         )
     }
 
-    /** Deletes a profile. If it was active, working values stay but become unsaved. */
-    suspend fun deleteProfile(id: String) {
+    /** Loads a slot's saved values into the working area. No-op if the slot is empty. */
+    suspend fun loadFromSlot(orientation: Orientation, slotNumber: Int) {
+        val key = slotKey(orientation, slotNumber)
         val current = stateFlow.value
+        val slot = current.slots[key] ?: return
+        updateState(current.copy(topScreen = slot.topScreen, bottomScreen = slot.bottomScreen, activeSlot = key))
+    }
+
+    /**
+     * Called on orientation change. If the NEW orientation has a last-used slot, load it; if the
+     * current working values already came from that orientation's slot, keep them untouched. If
+     * the new orientation has NO saved slot, keep the working values but clear [activeSlot] so the
+     * UI shows "默认（未保存）" instead of a stale label from the other orientation.
+     */
+    suspend fun onOrientationChanged(orientation: Orientation) {
+        val current = stateFlow.value
+        val activeKey = current.activeSlot
+        val activeInThisOrientation =
+            activeKey != null &&
+                activeKey.startsWith(orientation.name.lowercase()) &&
+                current.slots.containsKey(activeKey)
+        if (activeInThisOrientation) return
+        val lastUsed =
+            (1..SLOTS_PER_ORIENTATION)
+                .map { slotKey(orientation, it) }
+                .lastOrNull { current.slots.containsKey(it) }
+        val slot = lastUsed?.let { current.slots[it] }
         updateState(
-            current.copy(
-                profiles = current.profiles - id,
-                activeProfileId = if (current.activeProfileId == id) null else current.activeProfileId,
-            ),
+            if (slot != null) {
+                current.copy(topScreen = slot.topScreen, bottomScreen = slot.bottomScreen, activeSlot = lastUsed)
+            } else {
+                // No saved layout for this orientation: carry over the working values as unsaved.
+                current.copy(activeSlot = null)
+            },
         )
     }
 
-    /** Resets one screen to its natural position/scale. Profiles are not touched. */
+    /** Resets one screen to its natural position/scale. Slots are not touched. */
     suspend fun resetScreen(screen: ScreenId) {
         val current = stateFlow.value
         updateState(current.withTransform(screen, ScreenTransform.DEFAULT))
     }
 
-    /** Resets both screens to defaults. Does not touch saved profiles. */
+    /** Resets both screens to defaults. Does not touch saved slots. */
     suspend fun resetToDefault() {
         val current = stateFlow.value
         updateState(
             current.copy(
                 topScreen = ScreenTransform.DEFAULT,
                 bottomScreen = ScreenTransform.DEFAULT,
-                activeProfileId = null,
+                activeSlot = null,
             ),
         )
     }
 
-    private fun nextProfileId(profiles: Map<String, ScreenLayoutProfile>): String {
-        var index = 1
-        while (profiles.containsKey("profile_$index")) index++
-        return "profile_$index"
-    }
-
-    /** Default name for a new profile, e.g. "方案 1". Picks the lowest free index. */
-    fun suggestProfileName(): String {
-        val usedNames = stateFlow.value.profiles.values.map { it.name }.toSet()
-        var index = 1
-        while ("方案 $index" in usedNames) index++
-        return "方案 $index"
+    /** Human label for the active slot (e.g. "横·槽2"), or null when not loaded from a slot. */
+    fun activeSlotLabel(): String? {
+        val key = stateFlow.value.activeSlot ?: return null
+        val orientation = if (key.startsWith("portrait")) "竖" else "横"
+        val number = key.substringAfterLast('_').toIntOrNull() ?: return null
+        return "$orientation·槽$number"
     }
 
     private fun loadState(): ScreenLayoutState {
         return try {
             sharedPreferences.getString(PREF_KEY, null)
                 ?.let { Json.decodeFromString(ScreenLayoutState.serializer(), it) }
-                ?.let { migrateLegacy(it) }
                 ?.let { deriveWorkingValues(it) }
                 ?: ScreenLayoutState()
         } catch (e: Exception) {
@@ -247,55 +243,16 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
     }
 
     /**
-     * Working values are session-only: on startup they are derived from the explicitly
-     * selected profile (or defaults). Unsaved tweaks never leak into the next session,
-     * so a game always opens at the expected position.
+     * Working values are derived from the explicitly selected slot (or defaults). A legacy
+     * blob that only had "profiles" (pre-v1.20.1) has no slots, so it simply starts at
+     * defaults — profiles were never exposed in the UI.
      */
     private fun deriveWorkingValues(state: ScreenLayoutState): ScreenLayoutState {
-        val active = state.activeProfileId?.let { state.profiles[it] }
+        val active = state.activeSlot?.let { state.slots[it] }
         return if (active == null) {
-            state.copy(
-                topScreen = ScreenTransform.DEFAULT,
-                bottomScreen = ScreenTransform.DEFAULT,
-            )
+            state.copy(topScreen = ScreenTransform.DEFAULT, bottomScreen = ScreenTransform.DEFAULT)
         } else {
             state.copy(topScreen = active.topScreen, bottomScreen = active.bottomScreen)
-        }
-    }
-
-    /** Migrates v1.2 combined transforms (single offset/scale) into per-screen values. */
-    private fun migrateLegacy(state: ScreenLayoutState): ScreenLayoutState {
-        val legacyTransform = ScreenTransform(state.offsetX, state.offsetY, state.scale)
-        val hasLegacy = !legacyTransform.isDefault
-        val migratedProfiles =
-            state.profiles.mapValues { (_, profile) ->
-                val legacyProfileTransform = ScreenTransform(profile.offsetX, profile.offsetY, profile.scale)
-                if (!legacyProfileTransform.isDefault &&
-                    profile.topScreen.isDefault &&
-                    profile.bottomScreen.isDefault
-                ) {
-                    profile.copy(
-                        topScreen = legacyProfileTransform,
-                        bottomScreen = legacyProfileTransform,
-                        offsetX = 0f,
-                        offsetY = 0f,
-                        scale = 1.0f,
-                    )
-                } else {
-                    profile
-                }
-            }
-        return if (hasLegacy && state.topScreen.isDefault && state.bottomScreen.isDefault) {
-            state.copy(
-                topScreen = legacyTransform,
-                bottomScreen = legacyTransform,
-                profiles = migratedProfiles,
-                offsetX = 0f,
-                offsetY = 0f,
-                scale = 1.0f,
-            )
-        } else {
-            state.copy(profiles = migratedProfiles)
         }
     }
 
@@ -330,5 +287,9 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
 
         // Amount "间距" tools change the gap per press (pixels).
         const val GAP_DELTA = 8f
+
+        /** Slot map key: "portrait_1" … "landscape_3". */
+        fun slotKey(orientation: Orientation, slotNumber: Int): String =
+            "${orientation.name.lowercase()}_$slotNumber"
     }
 }

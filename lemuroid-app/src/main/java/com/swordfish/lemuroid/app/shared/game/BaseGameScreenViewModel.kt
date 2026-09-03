@@ -318,20 +318,24 @@ class BaseGameScreenViewModel(
     fun setScreenLayoutScale(screen: ScreenLayoutManager.ScreenId, scale: Float) =
         screenLayout.setScale(screen, scale)
 
-    fun saveScreenLayoutAsNewProfile(name: String) = screenLayout.saveAsNewProfile(name)
+    /** Saves the current working layout into a slot (orientation + 1..3). */
+    fun saveScreenLayoutToSlot(orientation: ScreenLayoutManager.Orientation, slotNumber: Int) =
+        screenLayout.saveToSlot(orientation, slotNumber)
 
-    fun overwriteActiveScreenLayoutProfile(newName: String? = null) =
-        screenLayout.overwriteActiveProfile(newName)
+    /** Loads a slot's saved layout into the working area. */
+    fun loadScreenLayoutFromSlot(orientation: ScreenLayoutManager.Orientation, slotNumber: Int) =
+        screenLayout.loadFromSlot(orientation, slotNumber)
 
-    fun selectScreenLayoutProfile(id: String) = screenLayout.selectProfile(id)
+    /** Auto-loads the new orientation's last-used slot on rotation (no-op if none saved). */
+    fun onScreenLayoutOrientationChanged(orientation: ScreenLayoutManager.Orientation) =
+        screenLayout.onOrientationChanged(orientation)
 
-    fun deleteScreenLayoutProfile(id: String) = screenLayout.deleteProfile(id)
+    /** Human label for the active slot (e.g. "横·槽2"), or null when not loaded from a slot. */
+    fun currentScreenLayoutSlotLabel(): String? = screenLayout.activeSlotLabel()
 
     fun resetScreenLayoutScreen(screen: ScreenLayoutManager.ScreenId) = screenLayout.resetScreen(screen)
 
     fun resetScreenLayoutToDefault() = screenLayout.resetToDefault()
-
-    fun suggestScreenLayoutProfileName(): String = screenLayout.suggestProfileName()
 
     fun getTouchControllerConfig(): Flow<ControllerConfig> {
         return touchControls.getTouchControllerConfig()
