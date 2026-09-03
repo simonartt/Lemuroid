@@ -947,12 +947,12 @@ private fun ScreenLayoutEditorOverlay(
                     if (selectedScreen.value == ScreenLayoutManager.ScreenId.TOP) topRect else bottomRect
                 Box(
                     modifier = Modifier
-                        .offset(
+                        .offset {
                             IntOffset(
                                 (selRect.right - fullPos.left).toInt(),
                                 (selRect.bottom - fullPos.top).toInt(),
-                            ),
-                        )
+                            )
+                        }
                         .size(50.dp)
                         .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(6.dp))
                         .border(2.dp, Color(0xFF35b5e8), RoundedCornerShape(6.dp)),
