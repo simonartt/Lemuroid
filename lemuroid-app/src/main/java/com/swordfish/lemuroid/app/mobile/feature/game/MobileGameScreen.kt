@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -958,15 +959,16 @@ private fun ScreenLayoutEditorOverlay(
                     contentAlignment = Alignment.Center,
                 ) {
                     // ↘ double-arrow drawn with Canvas (Icons.Default.SouthEast is not in core icons).
+                    // DrawScope units are already pixels — no toPx() needed (Float.toPx doesn't exist).
                     Canvas(modifier = Modifier.size(28.dp)) {
-                        val p = 4f.toPx()
+                        val p = 4f
                         val corner = size.minDimension - p
                         val lineColor = Color.Black
-                        drawLine(lineColor, Offset(p, p), Offset(corner, corner), strokeWidth = 3f.toPx())
+                        drawLine(lineColor, Offset(p, p), Offset(corner, corner), strokeWidth = 3f)
                         // Arrowhead at the bottom-right tip: two short strokes back toward center.
-                        val head = 9f.toPx()
-                        drawLine(lineColor, Offset(corner - head, corner), Offset(corner, corner), strokeWidth = 3f.toPx())
-                        drawLine(lineColor, Offset(corner, corner - head), Offset(corner, corner), strokeWidth = 3f.toPx())
+                        val head = 9f
+                        drawLine(lineColor, Offset(corner - head, corner), Offset(corner, corner), strokeWidth = 3f)
+                        drawLine(lineColor, Offset(corner, corner - head), Offset(corner, corner), strokeWidth = 3f)
                     }
                 }
             }
@@ -1123,7 +1125,7 @@ private fun ScreenLayoutSubmenu(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "保存 / 载入布局（$dir版 · 全局）",
+                    text = "保存 / 载入布局（${dir}版 · 全局）",
                     color = Color.White,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,

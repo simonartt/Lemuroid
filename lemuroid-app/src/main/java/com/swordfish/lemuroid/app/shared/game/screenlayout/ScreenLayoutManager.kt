@@ -28,8 +28,7 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
 
     enum class Orientation { PORTRAIT, LANDSCAPE }
 
-    /** Number of saved slots per orientation (user-pinned: 3). */
-    const val SLOTS_PER_ORIENTATION = 3
+    // Number of saved slots per orientation lives in the companion (SLOTS_PER_ORIENTATION).
 
     @Serializable
     data class ScreenTransform(
@@ -268,6 +267,9 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
 
     companion object {
         private const val PREF_KEY = "nds_screen_layout_settings"
+
+        /** Number of saved slots per orientation (user-pinned: 3). */
+        const val SLOTS_PER_ORIENTATION = 3
 
         const val MIN_SCALE = 0.15f
         // Raised from 2.0 to support the zoom panel's 1x..7x stepped scale in the new editor UI.
