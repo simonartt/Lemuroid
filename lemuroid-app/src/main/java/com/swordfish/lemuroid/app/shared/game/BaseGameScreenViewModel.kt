@@ -367,7 +367,16 @@ class BaseGameScreenViewModel(
     fun loadScreenLayoutFromSlot(orientation: ScreenLayoutManager.Orientation, slotNumber: Int) =
         screenLayout.loadFromSlot(orientation, slotNumber)
 
-    /** Auto-loads the new orientation's last-used slot on rotation (no-op if none saved). */
+    /** Manual layout-mode switch (v1.20.8): rotation is NOT a trigger, only these UI entries are. */
+    fun switchScreenLayoutOrientation(orientation: ScreenLayoutManager.Orientation) =
+        screenLayout.switchLayoutOrientation(orientation)
+
+    /** The current manual layout mode (drives all NDS geometry). */
+    fun currentScreenLayoutOrientation(): ScreenLayoutManager.Orientation =
+        screenLayout.currentLayoutOrientation()
+
+    /** No-op since v1.20.8; kept so stale callers compile. */
+    @Suppress("DEPRECATION")
     fun onScreenLayoutOrientationChanged(orientation: ScreenLayoutManager.Orientation) =
         screenLayout.onOrientationChanged(orientation)
 

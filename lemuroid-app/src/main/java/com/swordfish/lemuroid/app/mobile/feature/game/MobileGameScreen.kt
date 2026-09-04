@@ -114,9 +114,7 @@ import gg.padkit.config.HapticFeedbackType
 import gg.padkit.ids.Id
 import gg.padkit.inputstate.InputState
 import timber.log.Timber
-import android.view.KeyEvent
 import com.swordfish.touchinput.radial.layouts.LocalSelectedButton
-import com.swordfish.touchinput.radial.layouts.shared.ComposeTouchLayouts
 
 /**
  * Every control id any touch layout can register (v1.20.7). While the touch-controls editor is
@@ -129,28 +127,18 @@ import com.swordfish.touchinput.radial.layouts.shared.ComposeTouchLayouts
  * that same state → everything goes inert while editing. Ids unused by the active pad are
  * harmless no-ops inside InputState (fold removes from empty sets).
  */
-private val ALL_TOUCH_CONTROL_IDS: Set<Id> = setOf(
-    Id.Key(KeyEvent.KEYCODE_BUTTON_A),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_B),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_X),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_Y),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_L1),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_L2),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_R1),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_R2),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_SELECT),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_START),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_MODE),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBL),
-    Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
-    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD),
-    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_LEFT_STICK),
-    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_RIGHT_STICK),
-    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD_AND_LEFT_STICK),
-    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_RIGHT_DPAD),
-    Id.ContinuousDirection(ComposeTouchLayouts.MOTION_SOURCE_LEFT_STICK),
-    Id.ContinuousDirection(ComposeTouchLayouts.MOTION_SOURCE_RIGHT_STICK),
-)
+private val ALL_TOUCH_CONTROL_IDS: Set<Id> = buildSet {
+    // Digital keys — every KeyEvent.BUTTON_* code (4..18 on Android) plus slack for any
+    // composite/derived ids PadKit may fold internally. Enumerating the whole space (instead of
+    // the exact set the active layout registers) keeps the neutralization correct for ANY
+    // pad layout, and unused ids are harmless no-ops inside InputState's fold.
+    for (code in 0..31) add(Id.Key(code))
+    // Direction controls — every MOTION_SOURCE value under both direction wrappers.
+    for (src in 0..4) {
+        add(Id.DiscreteDirection(src))
+        add(Id.ContinuousDirection(src))
+    }
+}
 
 @Composable
 fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
@@ -165,15 +153,11 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                     TouchControllerSettingsManager.Orientation.PORTRAIT
                 }
             viewModel.onScreenOrientationChanged(orientation)
-            // NDS layouts are stored per-orientation (3 slots each): on rotation, auto-load the
-            // new orientation's last-used slot if one exists (no-op otherwise).
-            viewModel.onScreenLayoutOrientationChanged(
-                if (isLandscape) {
-                    ScreenLayoutManager.Orientation.LANDSCAPE
-                } else {
-                    ScreenLayoutManager.Orientation.PORTRAIT
-                },
-            )
+            // v1.20.8: rotation NO LONGER touches the NDS screen layout. The layout is a manual
+            // mode (layoutOrientation in ScreenLayoutState) switched from the game menu / editor
+            // sub-menu — gravity-driven switching kept clobbering unsaved work between modes.
+            // Touch-button settings DO stay per-physical-orientation (they follow how you hold
+            // the phone, a separate concern from where the two screens render).
         }
 
         val controllerConfigState = viewModel.getTouchControllerConfig().collectAsState(null)
@@ -285,13 +269,17 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 // full height side-by-side in landscape). There is no aspect-fit single-viewport
                 // fallback for NDS anymore, which is what made the editor frames drift from the
                 // actual runtime size.
+                // v1.20.8: geometry follows the MANUAL layout mode (screenLayout.layoutOrientation),
+                // NOT the physical rotation — editing one mode can never disturb the other.
                 val applySplitLayout = viewModel.isNdsSystem() && screenLayout != null
                 if (applySplitLayout) {
-                    val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, isLandscape)
+                    val layoutLandscape =
+                        screenLayout!!.layoutOrientation == ScreenLayoutManager.Orientation.LANDSCAPE
+                    val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, layoutLandscape)
                     val topRect =
-                        applyScreenLayoutTransform(naturalTop, screenLayout!!.topScreen, gapSign = -1f, isLandscape, fullPos)
+                        applyScreenLayoutTransform(naturalTop, screenLayout.topScreen, gapSign = -1f, layoutLandscape, fullPos)
                     val bottomRect =
-                        applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen, gapSign = +1f, isLandscape, fullPos)
+                        applyScreenLayoutTransform(naturalBottom, screenLayout.bottomScreen, gapSign = +1f, layoutLandscape, fullPos)
                     val topViewport = normalizeToFullScreen(topRect, fullPos)
                     val bottomViewport = normalizeToFullScreen(bottomRect, fullPos)
                     Timber.d("Setting split viewport: top=$topViewport bottom=$bottomViewport")
@@ -659,41 +647,58 @@ private fun TouchControlsEditorOverlay(
                 }
             }
             // Expandable visibility panel (v1.20.6): replaces the old always-visible LEFT column.
+            // v1.20.8: laid out as a GRID (4 per row) instead of one long column — the single
+            // column made the floating card extremely tall with 10 buttons. Each cell = toggle on
+            // top + short label below (vertical keeps the 4 columns readable); tapping the cell
+            // selects that button.
             if (visibilityExpanded) {
                 Column(
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 220.dp)
+                            .heightIn(max = 240.dp)
                             .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    for (btn in allButtons) {
-                        val visible = !touchControllerSettings.isButtonHidden(btn)
-                        val active = selectedButton.value == btn
+                    for (rowBtns in allButtons.chunked(4)) {
                         Row(
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .then(
-                                        if (active) Modifier.background(Color(0x2235b5e8), RoundedCornerShape(6.dp))
-                                        else Modifier,
-                                    )
-                                    .clickable { viewModel.selectEditTarget(btn) }
-                                    .padding(horizontal = 6.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            MiniToggle(
-                                on = visible,
-                                onToggle = { nv -> viewModel.toggleButtonVisibility(btn, !nv) },
-                            )
-                            Text(
-                                text = btn.label,
-                                color = if (visible) Color.White else Color.White.copy(alpha = 0.45f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                            )
+                            for (btn in rowBtns) {
+                                val visible = !touchControllerSettings.isButtonHidden(btn)
+                                val active = selectedButton.value == btn
+                                Column(
+                                    modifier =
+                                        Modifier
+                                            // weight(1f) keeps the 4 columns aligned even when the
+                                            // last row has fewer cells.
+                                            .weight(1f)
+                                            .then(
+                                                if (active) Modifier.background(Color(0x2235b5e8), RoundedCornerShape(6.dp))
+                                                else Modifier,
+                                            )
+                                            .clickable { viewModel.selectEditTarget(btn) }
+                                            .padding(horizontal = 2.dp, vertical = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    MiniToggle(
+                                        on = visible,
+                                        onToggle = { nv -> viewModel.toggleButtonVisibility(btn, !nv) },
+                                    )
+                                    Text(
+                                        text = buttonEditorLabel(btn, isNds),
+                                        color = if (visible) Color.White else Color.White.copy(alpha = 0.45f),
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                            // Pad a short last row so the columns stay aligned.
+                            repeat(4 - rowBtns.size) {
+                                Box(modifier = Modifier.weight(1f))
+                            }
                         }
                     }
                 }
@@ -701,6 +706,25 @@ private fun TouchControlsEditorOverlay(
         }
     }
 }
+
+/**
+ * Editor-facing label for a button GROUP (v1.20.8). On NDS the left-stick / right-stick slots
+ * are repurposed: MelonDS renders 关屏 (close a screen) and 换屏 (swap screens) there, and the
+ * L2 slot is the mic — the generic enum labels (左摇杆/右摇杆/菜单) were actively confusing
+ * (user-reported "左摇杆其实是关屏按钮"). Non-NDS keeps the enum defaults.
+ */
+private fun buttonEditorLabel(
+    id: TouchButtonId,
+    isNds: Boolean,
+): String =
+    when {
+        isNds && id == TouchButtonId.THUMBL -> "关屏"
+        isNds && id == TouchButtonId.THUMBR -> "换屏"
+        // MelonDS renders L2 as a mic and DeSmuME as a close-screen — core-dependent, so just
+        // show the key itself instead of the misleading generic "菜单".
+        isNds && id == TouchButtonId.L2 -> "L2"
+        else -> id.label
+    }
 
 /** Small pill slide switch for the left visibility panel (same look as ScreenEnableToggle). */
 @Composable
@@ -1171,7 +1195,12 @@ private fun ScreenLayoutEditorOverlay(
     val menuOpen = remember { mutableStateOf(false) }
 
     if (fullPos != null && viewPos != null) {
-        val isLandscape = screenWidthPx > screenHeightPx
+        // v1.20.8: the editor's dashed frames, gap axis, toolbox grid and zoom steps ALL follow
+        // the MANUAL layout mode (layoutState.layoutOrientation) — not how the phone is held.
+        // The dashed frames are the WYSIWYG preview of the runtime split-viewport, so both must
+        // anchor on the same orientation or the frames would lie while editing in the other mode.
+        val isLandscape =
+            layoutState.layoutOrientation == ScreenLayoutManager.Orientation.LANDSCAPE
 
         // Natural rects are needed both for display and for the align/center tools.
         val (naturalTop, naturalBottom) = computeNaturalScreenRects(viewPos, isLandscape)
@@ -1420,7 +1449,6 @@ private fun ScreenLayoutEditorOverlay(
                     modifier = Modifier.align(Alignment.BottomStart),
                     viewModel = viewModel,
                     layoutState = layoutState,
-                    isLandscape = isLandscape,
                     onDismiss = { menuOpen.value = false },
                     onEditTouchControls = {
                         menuOpen.value = false
@@ -1542,19 +1570,26 @@ private fun DraggableMenuButton(viewModel: BaseGameScreenViewModel) {
  *  - 返回游戏菜单 (close the editor and open the game menu).
  * Layouts are GLOBAL across NDS games and split by orientation (Plan A: 竖/横各 3 槽).
  */
+/**
+ * The editor's "菜单" sub-menu (v1.20.5). Since v1.20.8 it also hosts the MANUAL layout-mode
+ * toggle: orientation is no longer driven by gravity, so the sub-menu derives the mode from
+ * [ScreenLayoutManager.ScreenLayoutState.layoutOrientation] and can switch it in place — the
+ * dashed frames / toolbox / slots all re-anchor on the new mode instantly, and each mode's
+ * unsaved work values are parked and restored when you switch back.
+ */
 @Composable
 private fun ScreenLayoutSubmenu(
     modifier: Modifier = Modifier,
     viewModel: BaseGameScreenViewModel,
     layoutState: ScreenLayoutManager.ScreenLayoutState,
-    isLandscape: Boolean,
     onDismiss: () -> Unit,
     onEditTouchControls: () -> Unit,
     onReturnToGameMenu: () -> Unit,
 ) {
-    val orientation =
-        if (isLandscape) ScreenLayoutManager.Orientation.LANDSCAPE else ScreenLayoutManager.Orientation.PORTRAIT
-    val dir = if (isLandscape) "横" else "竖"
+    val orientation = layoutState.layoutOrientation
+    val isLandscapeMode = orientation == ScreenLayoutManager.Orientation.LANDSCAPE
+    val dir = if (isLandscapeMode) "横" else "竖"
+    val otherDir = if (isLandscapeMode) "竖屏" else "横屏"
     val activeLabel = viewModel.currentScreenLayoutSlotLabel()
     Surface(
         // FIXED width, bottom-LEFT aligned (user v1.20.3): in landscape a fillMaxWidth card
@@ -1625,6 +1660,27 @@ private fun ScreenLayoutSubmenu(
                             )
                         }
                     }
+                }
+            }
+            // v1.20.8: MANUAL layout-mode toggle. Switching parks the current mode's unsaved
+            // work and restores the other mode's — the two orientations never contaminate each
+            // other, and gravity is no longer involved at all.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                TextButton(
+                    onClick = {
+                        viewModel.switchScreenLayoutOrientation(
+                            if (isLandscapeMode) {
+                                ScreenLayoutManager.Orientation.PORTRAIT
+                            } else {
+                                ScreenLayoutManager.Orientation.LANDSCAPE
+                            },
+                        )
+                    },
+                ) {
+                    Text("切换到${otherDir}布局", color = Color(0xFF35b5e8), fontSize = 13.sp)
                 }
             }
             // v1.20.5: the touch-button editor moved from the game menu into this sub-menu.

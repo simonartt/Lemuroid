@@ -7,7 +7,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -72,14 +76,35 @@ fun PadKitScope.TweakableButton(
     // pointerInput captures its block ONCE per key — hold the latest callbacks in updated
     // states so the drag loop never invokes a stale closure.
     val selectLatest = rememberUpdatedState(onEditSelect)
-    val dragLatest = rememberUpdatedState(onEditDrag)
+    val dragCommitLatest = rememberUpdatedState(onEditDrag)
+    // Latest COMMITTED freeX/freeY — read inside the once-built pointerInput closure through
+    // this updated state (capturing `bs` there would be stale).
+    val committedFree = rememberUpdatedState(bs.freeX to bs.freeY)
+
+    // LIVE drag delta (v1.20.8): while the finger moves, the button follows via this local pixel
+    // offset — nothing touches the Settings store mid-drag. Committing every event through the
+    // VM meant a full Settings+presets JSON encode + SharedPreferences write + pad-tree rebuild
+    // at ~120Hz; the backlog flushed in bursts = the ghosting / "shattering" the user saw (worse
+    // in landscape, where buttons are bigger). On finger-up the accumulated delta is committed
+    // ONCE; the live delta keeps rendering until the commit lands in bs.freeX/freeY (the
+    // `absorbed` check), which then hands the position over seamlessly — no snap-back frame,
+    // no double-move frame.
+    var liveDx by remember { mutableFloatStateOf(0f) }
+    var liveDy by remember { mutableFloatStateOf(0f) }
+    var startFreeX by remember { mutableFloatStateOf(0f) }
+    var startFreeY by remember { mutableFloatStateOf(0f) }
+    val absorbed = bs.freeX != startFreeX || bs.freeY != startFreeY
+    val lx = if (absorbed) 0f else liveDx
+    val ly = if (absorbed) 0f else liveDy
 
     // Build modifier: base + graphicsLayer for customization + pointerInput for edit mode.
     // freeX/freeY are PIXEL translations from free dragging (v1.20.5) and stack on top of the
     // legacy relative offset inside the same graphicsLayer.
-    val baseMod = if (bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f || bs.freeX != 0f || bs.freeY != 0f) {
-        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX
-        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY
+    val needsLayer = bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f ||
+        bs.freeX != 0f || bs.freeY != 0f || lx != 0f || ly != 0f
+    val baseMod = if (needsLayer) {
+        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX + lx
+        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY + ly
         Modifier.graphicsLayer(
             translationX = ox,
             translationY = oy,
@@ -107,8 +132,19 @@ fun PadKitScope.TweakableButton(
                     selectLatest.value?.invoke(id)
                     down.consume()
                     val downId = down.id
+                    // Each gesture commits only its OWN movement (accX). The live delta starts
+                    // from zero here; if a previous commit hasn't landed yet we lose at most one
+                    // frame of continuity — far cheaper than the double-count that carrying the
+                    // un-absorbed delta into a new commit would cause.
+                    var accX = 0f
+                    var accY = 0f
                     var lastX = down.position.x
                     var lastY = down.position.y
+                    val start = committedFree.value
+                    startFreeX = start.first
+                    startFreeY = start.second
+                    liveDx = 0f
+                    liveDy = 0f
                     while (true) {
                         val move = awaitPointerEvent()
                         val ch = move.changes.firstOrNull { it.id == downId } ?: break
@@ -118,9 +154,16 @@ fun PadKitScope.TweakableButton(
                         lastX = ch.position.x
                         lastY = ch.position.y
                         if (dx != 0f || dy != 0f) {
-                            dragLatest.value?.invoke(id, dx, dy)
+                            accX += dx
+                            accY += dy
+                            liveDx = accX
+                            liveDy = accY
                         }
                         ch.consume()
+                    }
+                    // Finger lifted: commit the whole accumulated drag exactly once.
+                    if (accX != 0f || accY != 0f) {
+                        dragCommitLatest.value?.invoke(id, accX, accY)
                     }
                 }
             }

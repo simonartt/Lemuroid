@@ -13,6 +13,11 @@ object GameMenuContract {
     const val EXTRA_CURRENT_TILT_CONFIG = "EXTRA_CURRENT_TILT_CONFIG"
     const val EXTRA_TILT_ALL_CONFIGS = "EXTRA_TILT_ALL_CONFIGS"
     const val EXTRA_TOUCH_CONTROLS_ENABLED = "EXTRA_TOUCH_CONTROLS_ENABLED"
+    // v1.20.8: NDS screen layout is a MANUAL mode (no longer follows gravity). These carry the
+    // current mode into the menu and the picked mode back out (ScreenLayoutManager.Orientation.ordinal).
+    const val EXTRA_SCREEN_LAYOUT_ORIENTATION = "EXTRA_SCREEN_LAYOUT_ORIENTATION"
+    const val EXTRA_SCREEN_LAYOUT_IS_NDS = "EXTRA_SCREEN_LAYOUT_IS_NDS"
+    const val RESULT_SCREEN_LAYOUT_ORIENTATION = "RESULT_SCREEN_LAYOUT_ORIENTATION"
 
     const val RESULT_RESET = "RESULT_RESET"
     const val RESULT_SAVE = "RESULT_SAVE"

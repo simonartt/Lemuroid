@@ -6,6 +6,35 @@
 
 ## v1.21 - 2026-09-03
 
+### v1.20.8 用户实测 4 点修正：显隐面板 4 列网格 / NDS 按键标签纠错 / 拖动改本地实时+松手一次提交（修重影）/ 画面布局改手动方向模式（彻底脱离重力感应）（版本升至 1.20.8-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 273 / versionName 1.20.8 / suffix -v8b**（用户 v1.20.7 真机实测 4 点反馈，"问题不小 你仔细思考"）:
+
+1. **显隐面板改网格（UI）** — v1.20.6 的展开显隐列表是单竖排 10 行，把悬浮卡片撑得极长。改 `allButtons.chunked(4)` 每行 4 格（最多 3 行）：每格=上方 MiniToggle + 下方 10sp 标签（垂直堆叠保证 4 列可读），`Column weight(1f)` 等宽对齐，末行不足用 `Box(weight(1f))` 补位；最大高 240dp 内竖滚。
+2. **bug1：按键标签纠错（"左摇杆其实是关屏按钮"）** — 根因：NDS 布局把摇杆格位挪用成快捷键——MelonDS 的 THUMBL 格渲染 `button_close_screen`（关屏）、THUMBR 渲染 `button_swap_screens`（换屏）；且 **L2 格也错位**（MelonDS=麦克风图标、Desmume=关屏图标），但枚举 label 仍写死"左摇杆/右摇杆/菜单"。修：新增 `buttonEditorLabel(id, isNds)`——NDS 下 THUMBL→"关屏"、THUMBR→"换屏"、L2→"L2"（因核而异不硬编中文语义），非 NDS 保留枚举默认。注意：图标/事件本身没变（仍发 KEYCODE_BUTTON_THUMBL 等，GameShortcut 的 L3+R3=菜单组合不受影响），只是标签说谎。
+3. **bug2：拖动重影/四分五裂仍在（横屏更严重）——v1.20.7 只治了 PadKit 命中检测一路，真正主因是写路径积压** — 根因：旧实现每个 pointer 事件（~120Hz）都回调 `updateButtonFreeDrag` → VM scope.launch → 全量 Settings+预设 JSON 编码 → SharedPreferences 写 → StateFlow 回流 → 整棵 pad 树重组。事件速率远超重组吞吐，积压成批爆发=按钮"追手指"乱跳的鬼影；横屏按钮大、graphicsLayer 重组更贵，故更严重。修：**拖动期间完全不碰存储**——`TweakableButton`/`TweakableButtonDesmume` 本地 `liveDx/liveDy`（`remember { mutableFloatStateOf }`）实时驱动 graphicsLayer，手势内累加 accX/accY；松手才把整段增量经 `dragCommitLatest` 提交**一次**。`absorbed = bs.freeX != startFreeX || bs.freeY != startFreeY` 检查让提交落地帧无缝接管（live 增量清零由 bs 值接管，无 snap-back 帧、无双位移帧）。⚠️ 设计取舍：闭包内通过 `committedFree = rememberUpdatedState(bs.freeX to bs.freeY)` 读最新已提交值；**不结转**未吸收的 live 增量到新一次按下（会双重累加），代价是极端快连按下最多丢一帧连续性，远小于双计跳位的代价。
+4. **bug3：竖屏布局调好→旋横屏→回来把竖屏也带跑（互相污染）→ 用户拍板"直接把这两个模式分开，游戏菜单里按钮切换，不再被重力感应切换"** — 根因：v1.20.5 起虽按方向分 3+3 槽，但**工作值（未保存的编辑）是全局单份**，`LaunchedEffect(isLandscape)` 每次旋转调 `onOrientationChanged` 装载/清空活动槽，未保存的调校在切换瞬间被另一方向的几何覆盖；且 scale/offset 是相对**各自方向 natural rect** 的百分比语义，跨方向搬运必然爆钳制。修（手动模式，架构级）：
+   - `ScreenLayoutState` 新增 `layoutOrientation: Orientation = PORTRAIT`（@Serializable，老档默认竖屏布局）+ `workByOrientation: Map<String, OrientationWork>`（离开的模式的**未保存工作值+活动槽**停车表）。
+   - `switchLayoutOrientation(newMode)`：停车离开模式的当前值 → 进入模式优先恢复其 parked 值，否则载入其最后使用槽，否则 DEFAULT。**绝不把另一模式的工作值搬运过去**（v1.20.5 教训）。
+   - `onOrientationChanged` 标 `@Deprecated` 改 no-op；MobileGameScreen `LaunchedEffect(isLandscape)` 删除对布局方向的调用（**触控按键** settings 仍按物理方向分桶——那是"怎么拿手机"的问题，与"画面往哪摆"解耦）。
+   - **渲染与编辑器几何全部改读 `layoutOrientation`**：渲染 LaunchedEffect 里 `layoutLandscape` 传入 computeNaturalScreenRects/applyScreenLayoutTransform；编辑器 `val isLandscape = layoutState.layoutOrientation == LANDSCAPE`（替代 `screenWidthPx > screenHeightPx`）——虚线框是运行时 split-viewport 的 WYSIWYG 预览，两者必须锚同一模式。旋转手机画面**纹丝不动**。
+   - 两个切换入口：①游戏菜单新增"画面布局方向（NDS）"列表（竖屏布局/横屏布局，仅 NDS 显示），经 Intent extras（EXTRA_SCREEN_LAYOUT_ORIENTATION 传 ordinal + EXTRA_SCREEN_LAYOUT_IS_NDS 门控 / RESULT_SCREEN_LAYOUT_ORIENTATION 回传）→ BaseGameActivity.onActivityResult → `switchScreenLayoutOrientation`；②编辑器"菜单"子菜单新增"切换到横/竖屏布局"按钮（子菜单删掉 isLandscape 参数，改从 layoutState 推导），切换即时无需退出。
+
+**修改文件**:
+- `lemuroid-app/.../shared/game/screenlayout/ScreenLayoutManager.kt` — 新增 `@Serializable OrientationWork`；`ScreenLayoutState` 增 `layoutOrientation`/`workByOrientation`；新增 `switchLayoutOrientation()`（停车/恢复三分支）与 `currentLayoutOrientation()`；`onOrientationChanged` 改 @Deprecated no-op。
+- `lemuroid-app/.../shared/game/viewmodel/GameViewModelScreenLayout.kt` + `BaseGameScreenViewModel.kt` — 转发 `switchLayoutOrientation`/`currentLayoutOrientation`；旧 `onOrientationChanged` 加 @Suppress("DEPRECATION")。
+- `lemuroid-app/.../shared/GameMenuContract.kt` — 增 3 个 extra 常量。
+- `lemuroid-app/.../shared/game/BaseGameActivity.kt` — 菜单 Intent 塞当前模式 ordinal + isNds；onActivityResult 消费 RESULT_SCREEN_LAYOUT_ORIENTATION（`Orientation.values().getOrElse` 防越界）。
+- `lemuroid-app/.../mobile/feature/gamemenu/GameMenuActivity.kt` — GameMenuRequest 增 `isNdsGame`/`screenLayoutOrientation` 字段并解析。
+- `lemuroid-app/.../mobile/feature/gamemenu/GameMenuHomeScreen.kt` — isNdsGame 时渲染"画面布局方向（NDS）" LemuroidSettingsList（rememberMemoryIntSettingState(coerceIn(0,1))，onItemSelected 回传 index）。
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — ①显隐面板 chunked(4) 网格；②`buttonEditorLabel()`；③渲染 LaunchedEffect 用 layoutLandscape、编辑器 isLandscape 改读 layoutOrientation；④删除旋转触发布局切换；⑤`ALL_TOUCH_CONTROL_IDS` 改 `buildSet { for(code in 0..31) Id.Key(code); for(src in 0..4) Discrete/ContinuousDirection }`（删 android.view.KeyEvent / ComposeTouchLayouts import，0..4 兜底覆盖所有 MOTION_SOURCE，多余 id 对 InputState fold 无害）；⑥ScreenLayoutSubmenu 去 isLandscape 参数 + 新增模式切换按钮。
+- `lemuroid-touchinput/.../radial/layouts/MelonDS.kt` + `Desmume.kt` — TweakableButton/TweakableButtonDesmume 拖动改本地 live 增量+松手一次提交（见上 3）；import 补 `getValue/setValue/mutableFloatStateOf/remember`。
+- `lemuroid-app/build.gradle.kts` — versionCode 272→273、versionName 1.20.7→1.20.8
+
+**避坑**：⚠️ 手动模式下**任何"NDS 几何"代码一律读 `layoutState.layoutOrientation`，禁止再用 `screenWidthPx > screenHeightPx` / 物理 isLandscape**——渲染、编辑器虚线框、toolbox 网格、gap 轴都锚它；物理旋转只影响触控按键分桶。⚠️ 以后给拖动类交互加持久化时，先问"每事件都写存储会不会引发重组风暴"——本项目的 Settings 是全量 JSON 编解码，高频路径必须本地渲染+提交一次。
+
+---
+
 ### 触控编辑模式抖动/按键四分五裂修复：编辑期整盘走 PadKit 模拟通道置空 + 选中按键蓝色描边（版本升至 1.20.7-v8b）
 
 **分支 `v8b-nds-editor`，versionCode 272 / versionName 1.20.7 / suffix -v8b**（用户 v1.20.6 真机实测 BUG）:

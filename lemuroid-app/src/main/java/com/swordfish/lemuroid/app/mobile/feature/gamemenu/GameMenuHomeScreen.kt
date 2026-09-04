@@ -156,6 +156,29 @@ fun GameMenuHomeScreen(
             },
         )
 
+        // v1.20.8 (user-pinned): NDS screen layout is a MANUAL mode — rotation no longer switches
+        // it (that kept clobbering unsaved edits between orientations). Pick which layout the
+        // picture renders with here; each mode has its own slots and parked work values.
+        if (gameMenuRequest.isNdsGame) {
+            LemuroidSettingsList(
+                title = { Text(text = "画面布局方向（NDS）") },
+                items = listOf("竖屏布局", "横屏布局"),
+                useSelectedValueAsSubtitle = true,
+                icon = {
+                    Icon(
+                        painterResource(R.drawable.ic_menu_controls),
+                        contentDescription = "画面布局方向",
+                    )
+                },
+                state = rememberMemoryIntSettingState(
+                    gameMenuRequest.screenLayoutOrientation.coerceIn(0, 1),
+                ),
+                onItemSelected = { index, _ ->
+                    onResult { putExtra(GameMenuContract.RESULT_SCREEN_LAYOUT_ORIENTATION, index) }
+                },
+            )
+        }
+
         LemuroidSettingsSwitch(
             title = { Text(text = stringResource(id = R.string.game_menu_virtual_controls)) },
             icon = {

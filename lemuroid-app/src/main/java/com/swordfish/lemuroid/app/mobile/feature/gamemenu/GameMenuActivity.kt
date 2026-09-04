@@ -83,6 +83,9 @@ class GameMenuActivity : RetrogradeComponentActivity() {
         val currentTiltConfiguration: TiltConfiguration,
         val allTiltConfigurations: List<TiltConfiguration>,
         val touchControlsEnabled: Boolean,
+        // v1.20.8: manual NDS layout mode (ScreenLayoutManager.Orientation.ordinal) + NDS gate.
+        val isNdsGame: Boolean,
+        val screenLayoutOrientation: Int,
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -130,6 +133,10 @@ class GameMenuActivity : RetrogradeComponentActivity() {
                         ?: emptyList(),
                 touchControlsEnabled =
                     extras?.getBoolean(GameMenuContract.EXTRA_TOUCH_CONTROLS_ENABLED, true) ?: true,
+                isNdsGame =
+                    extras?.getBoolean(GameMenuContract.EXTRA_SCREEN_LAYOUT_IS_NDS, false) ?: false,
+                screenLayoutOrientation =
+                    extras?.getInt(GameMenuContract.EXTRA_SCREEN_LAYOUT_ORIENTATION, 0) ?: 0,
             )
 
         setContent {

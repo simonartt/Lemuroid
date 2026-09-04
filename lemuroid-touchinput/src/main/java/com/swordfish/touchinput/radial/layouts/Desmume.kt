@@ -5,7 +5,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -53,11 +57,28 @@ fun PadKitScope.TweakableButtonDesmume(
 
     // pointerInput captures its block once — read the latest callbacks through updated states.
     val selectLatest = rememberUpdatedState(onEditSelect)
-    val dragLatest = rememberUpdatedState(onEditDrag)
+    val dragCommitLatest = rememberUpdatedState(onEditDrag)
+    // Latest COMMITTED freeX/freeY for the once-built pointerInput closure.
+    val committedFree = rememberUpdatedState(bs.freeX to bs.freeY)
 
-    val baseMod = if (bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f || bs.freeX != 0f || bs.freeY != 0f) {
-        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX
-        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY
+    // LIVE drag delta (v1.20.8): the button follows the finger via a local pixel offset; the
+    // Settings store is written ONCE on finger-up. Per-event VM writes meant a full JSON encode
+    // + SharedPreferences write + pad rebuild at ~120Hz — the backlog caused the ghosting /
+    // shattering (worse in landscape). The live delta stays visible until the commit lands in
+    // bs.freeX/freeY (absorbed check): no snap-back, no double-move frame.
+    var liveDx by remember { mutableFloatStateOf(0f) }
+    var liveDy by remember { mutableFloatStateOf(0f) }
+    var startFreeX by remember { mutableFloatStateOf(0f) }
+    var startFreeY by remember { mutableFloatStateOf(0f) }
+    val absorbed = bs.freeX != startFreeX || bs.freeY != startFreeY
+    val lx = if (absorbed) 0f else liveDx
+    val ly = if (absorbed) 0f else liveDy
+
+    val needsLayer = bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f ||
+        bs.freeX != 0f || bs.freeY != 0f || lx != 0f || ly != 0f
+    val baseMod = if (needsLayer) {
+        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX + lx
+        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY + ly
         Modifier.graphicsLayer(
             translationX = ox,
             translationY = oy,
@@ -82,8 +103,15 @@ fun PadKitScope.TweakableButtonDesmume(
                     selectLatest.value?.invoke(id)
                     down.consume()
                     val downId = down.id
+                    var accX = 0f
+                    var accY = 0f
                     var lastX = down.position.x
                     var lastY = down.position.y
+                    val start = committedFree.value
+                    startFreeX = start.first
+                    startFreeY = start.second
+                    liveDx = 0f
+                    liveDy = 0f
                     while (true) {
                         val move = awaitPointerEvent()
                         val ch = move.changes.firstOrNull { it.id == downId } ?: break
@@ -93,9 +121,16 @@ fun PadKitScope.TweakableButtonDesmume(
                         lastX = ch.position.x
                         lastY = ch.position.y
                         if (dx != 0f || dy != 0f) {
-                            dragLatest.value?.invoke(id, dx, dy)
+                            accX += dx
+                            accY += dy
+                            liveDx = accX
+                            liveDy = accY
                         }
                         ch.consume()
+                    }
+                    // Finger lifted: commit the whole accumulated drag exactly once.
+                    if (accX != 0f || accY != 0f) {
+                        dragCommitLatest.value?.invoke(id, accX, accY)
                     }
                 }
             }

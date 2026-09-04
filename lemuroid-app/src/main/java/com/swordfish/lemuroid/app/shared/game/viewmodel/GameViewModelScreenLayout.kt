@@ -102,7 +102,20 @@ class GameViewModelScreenLayout(
         scope.launch { screenLayoutManager.loadFromSlot(orientation, slotNumber) }
     }
 
-    /** Auto-loads the new orientation's last-used slot on rotation (no-op if none saved). */
+    /**
+     * Manual layout-mode switch (v1.20.8): the user flips the portrait⇄landscape layout from the
+     * game menu / editor sub-menu. Rotation never calls this. Each mode keeps its own parked work
+     * values so tuning one cannot contaminate the other.
+     */
+    fun switchLayoutOrientation(orientation: Orientation) {
+        scope.launch { screenLayoutManager.switchLayoutOrientation(orientation) }
+    }
+
+    /** The current manual layout mode — drives all NDS geometry regardless of the phone's tilt. */
+    fun currentLayoutOrientation(): Orientation = screenLayoutManager.currentLayoutOrientation()
+
+    /** No-op since v1.20.8 (layouts are manual now); kept so any stale call site is harmless. */
+    @Suppress("DEPRECATION")
     fun onOrientationChanged(orientation: Orientation) {
         scope.launch { screenLayoutManager.onOrientationChanged(orientation) }
     }

@@ -22,6 +22,7 @@ import com.swordfish.lemuroid.app.shared.GameMenuContract
 import com.swordfish.lemuroid.app.shared.ImmersiveActivity
 import com.swordfish.lemuroid.app.shared.coreoptions.CoreOption
 import com.swordfish.lemuroid.app.shared.coreoptions.LemuroidCoreOption
+import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelSideEffects
 import com.swordfish.lemuroid.app.shared.input.InputDeviceManager
 import com.swordfish.lemuroid.app.shared.rumble.RumbleManager
@@ -226,6 +227,15 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                     GameMenuContract.EXTRA_TOUCH_CONTROLS_ENABLED,
                     baseGameScreenViewModel.isTouchControllerVisibleValue(),
                 )
+                // v1.20.8: the manual NDS layout mode + whether this game has one at all.
+                this.putExtra(
+                    GameMenuContract.EXTRA_SCREEN_LAYOUT_ORIENTATION,
+                    baseGameScreenViewModel.currentScreenLayoutOrientation().ordinal,
+                )
+                this.putExtra(
+                    GameMenuContract.EXTRA_SCREEN_LAYOUT_IS_NDS,
+                    baseGameScreenViewModel.isNdsSystem(),
+                )
             }
         startActivityForResult(intent, DIALOG_REQUEST)
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
@@ -426,6 +436,14 @@ abstract class BaseGameActivity : ImmersiveActivity() {
             }
             if (data?.getBooleanExtra(GameMenuContract.RESULT_EDIT_SCREEN_LAYOUT, false) == true) {
                 baseGameScreenViewModel.toggleEditScreenLayout(true)
+            }
+            // v1.20.8: manual NDS layout-mode switch from the game menu (replaces gravity).
+            if (data?.hasExtra(GameMenuContract.RESULT_SCREEN_LAYOUT_ORIENTATION) == true) {
+                val ordinal = data.getIntExtra(GameMenuContract.RESULT_SCREEN_LAYOUT_ORIENTATION, 0)
+                val target = ScreenLayoutManager.Orientation.values().getOrElse(ordinal) {
+                    ScreenLayoutManager.Orientation.PORTRAIT
+                }
+                baseGameScreenViewModel.switchScreenLayoutOrientation(target)
             }
             if (data?.hasExtra(GameMenuContract.RESULT_TOGGLE_TOUCH_CONTROLS) == true) {
                 val enabled = data.getBooleanExtra(GameMenuContract.RESULT_TOGGLE_TOUCH_CONTROLS, true)

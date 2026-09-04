@@ -67,6 +67,14 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         val bottomScreen: ScreenTransform = ScreenTransform.DEFAULT,
     )
 
+    /** Parked work values (unsaved edits + last active slot) of one orientation mode. */
+    @Serializable
+    data class OrientationWork(
+        val topScreen: ScreenTransform = ScreenTransform.DEFAULT,
+        val bottomScreen: ScreenTransform = ScreenTransform.DEFAULT,
+        val activeSlot: String? = null,
+    )
+
     @Serializable
     data class ScreenLayoutState(
         val topScreen: ScreenTransform = ScreenTransform.DEFAULT,
@@ -74,6 +82,13 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
         // Keyed by slotKey(orientation, n). Legacy "profiles" blobs are ignored on load.
         val slots: Map<String, Slot> = emptyMap(),
         val activeSlot: String? = null,
+        // Manual layout mode (v1.20.8, user-pinned): the picture is laid out in THIS orientation's
+        // geometry regardless of how the phone is physically held. Gravity no longer switches
+        // layouts — the game menu / editor sub-menu flip [layoutOrientation] explicitly, and each
+        // mode keeps its own work values so editing one never disturbs the other.
+        val layoutOrientation: Orientation = Orientation.PORTRAIT,
+        // Parked work values (unsaved edits) of the INACTIVE mode, keyed by Orientation.name.
+        val workByOrientation: Map<String, OrientationWork> = emptyMap(),
     ) {
         fun transformOf(screen: ScreenId): ScreenTransform =
             if (screen == ScreenId.TOP) topScreen else bottomScreen
@@ -187,36 +202,74 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
     }
 
     /**
-     * Called on orientation change. If the NEW orientation has a last-used slot, load it; if the
-     * current working values already came from that orientation's slot, keep them untouched. If
-     * the new orientation has NO saved slot, keep the working values but clear [activeSlot] so the
-     * UI shows "默认（未保存）" instead of a stale label from the other orientation.
+     * Manual layout-mode switch (v1.20.8, replaces the old gravity-driven
+     * [onOrientationChanged]). The user picks which orientation's layout the game renders with;
+     * rotating the phone never calls this. The work values of the mode being LEFT are PARKED
+     * (kept, including the dirty edits never saved to a slot) so switching back restores them —
+     * the two modes can no longer contaminate each other. Entering a mode loads its parked work
+     * if it has one; otherwise its last-used slot; otherwise the DEFAULT layout.
      */
-    suspend fun onOrientationChanged(orientation: Orientation) {
+    suspend fun switchLayoutOrientation(newMode: Orientation) {
         val current = stateFlow.value
-        val activeKey = current.activeSlot
-        val activeInThisOrientation =
-            activeKey != null &&
-                activeKey.startsWith(orientation.name.lowercase()) &&
-                current.slots.containsKey(activeKey)
-        if (activeInThisOrientation) return
-        val lastUsed =
-            (1..SLOTS_PER_ORIENTATION)
-                .map { slotKey(orientation, it) }
-                .lastOrNull { current.slots.containsKey(it) }
-        val slot = lastUsed?.let { current.slots[it] }
-        updateState(
-            if (slot != null) {
-                current.copy(topScreen = slot.topScreen, bottomScreen = slot.bottomScreen, activeSlot = lastUsed)
+        if (current.layoutOrientation == newMode) return
+        val leavingKey = current.layoutOrientation.name
+        val parked = OrientationWork(current.topScreen, current.bottomScreen, current.activeSlot)
+        val enteringKey = newMode.name
+        val stored = current.workByOrientation[enteringKey]
+        val enteringHasSlot =
+            (1..SLOTS_PER_ORIENTATION).any { current.slots.containsKey(slotKey(newMode, it)) }
+        val next =
+            if (stored != null) {
+                current.copy(
+                    topScreen = stored.topScreen,
+                    bottomScreen = stored.bottomScreen,
+                    activeSlot = stored.activeSlot,
+                    layoutOrientation = newMode,
+                    workByOrientation = current.workByOrientation + (leavingKey to parked) - enteringKey,
+                )
+            } else if (enteringHasSlot) {
+                // No parked edits: auto-load the NEW mode's last-used slot (mirror of the old
+                // rotation behavior, but only ever triggered manually).
+                val lastUsed =
+                    (1..SLOTS_PER_ORIENTATION)
+                        .map { slotKey(newMode, it) }
+                        .lastOrNull { current.slots.containsKey(it) }
+                val slot = lastUsed?.let { current.slots[it] }!!
+                current.copy(
+                    topScreen = slot.topScreen,
+                    bottomScreen = slot.bottomScreen,
+                    activeSlot = lastUsed,
+                    layoutOrientation = newMode,
+                    workByOrientation = current.workByOrientation + (leavingKey to parked),
+                )
             } else {
-                // No saved layout for this orientation (v1.20.5, Plan A): DO NOT carry the old
-                // orientation's working values over — scale/offset are relative to per-orientation
-                // natural rects, so a portrait-tuned value blows past the landscape clamp and the
-                // pair fills the whole device. Fall back to the DEFAULT layout instead; users who
-                // want to reuse a layout across orientations save it into the new orientation's slots.
-                current.copy(topScreen = ScreenTransform.DEFAULT, bottomScreen = ScreenTransform.DEFAULT, activeSlot = null)
-            },
-        )
+                // Fresh mode with neither edits nor saved slots: start clean. Do NOT carry the
+                // leaving mode's values over — scale/offset are relative to per-mode natural
+                // rects and would blow past the other mode's clamp (the v1.20.5 lesson).
+                current.copy(
+                    topScreen = ScreenTransform.DEFAULT,
+                    bottomScreen = ScreenTransform.DEFAULT,
+                    activeSlot = null,
+                    layoutOrientation = newMode,
+                    workByOrientation = current.workByOrientation + (leavingKey to parked),
+                )
+            }
+        updateState(next)
+    }
+
+    /** Current manual layout mode (v1.20.8). Rendering + editor geometry anchor on this. */
+    fun currentLayoutOrientation(): Orientation = stateFlow.value.layoutOrientation
+
+    /**
+     * Called on orientation change. DEPRECATED (v1.20.8): layouts no longer follow gravity —
+     * the user switches modes manually via [switchLayoutOrientation]. Kept as a no-op so old
+     * call sites fail loudly when removed.
+     */
+    @Deprecated("Layouts are now manual (v1.20.8): gravity must NOT switch them.")
+    suspend fun onOrientationChanged(orientation: Orientation) {
+        // Intentionally empty: rotation no longer touches the screen layout at all. The two
+        // orientation modes keep separate work values and slots; only switchLayoutOrientation
+        // moves between them.
     }
 
     /** Resets one screen to its natural position/scale. Slots are not touched. */
