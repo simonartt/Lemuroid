@@ -1,13 +1,17 @@
 package com.swordfish.touchinput.radial.layouts
 
 import android.view.KeyEvent
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
 import com.swordfish.touchinput.controller.R
 import com.swordfish.touchinput.radial.controls.LemuroidControlButton
 import com.swordfish.touchinput.radial.controls.LemuroidControlCross
@@ -41,6 +45,9 @@ fun PadKitScope.TweakableButtonDesmume(
     val onEditDrag = LocalButtonDrag.current
     val isEditing = onEditSelect != null
     val isHidden = settings.isButtonHidden(id)
+    // Selected group gets a blue ring — the only press/selection feedback now that the pad is
+    // neutralized in edit mode (v1.20.7).
+    val isSelected = isEditing && LocalSelectedButton.current == id
 
     if (isHidden && !isEditing) return
 
@@ -97,7 +104,12 @@ fun PadKitScope.TweakableButtonDesmume(
         mod
     }
 
-    content(finalMod)
+    // Blue selection ring for the currently edited button group (v1.20.7).
+    val ringMod =
+        if (isSelected) Modifier.border(2.dp, Color(0xFF35B5E8), RoundedCornerShape(16.dp))
+        else Modifier
+
+    content(finalMod.then(ringMod))
 }
 
 @Composable

@@ -1,15 +1,19 @@
 package com.swordfish.touchinput.radial.layouts
 
 import android.view.KeyEvent
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
 import com.swordfish.touchinput.controller.R
 import com.swordfish.touchinput.radial.controls.LemuroidControlButton
 import com.swordfish.touchinput.radial.controls.LemuroidControlCross
@@ -38,6 +42,13 @@ val LocalButtonEdit = compositionLocalOf<((TouchButtonId) -> Unit)?>(defaultFact
  */
 val LocalButtonDrag = compositionLocalOf<((TouchButtonId, Float, Float) -> Unit)?>(defaultFactory = { null })
 
+/**
+ * Currently SELECTED button in the touch-controls editor (v1.20.7). Since the pad is fully
+ * neutralized while editing (no press highlight at all), this drives the blue selection ring
+ * that tells the user which button the size slider / reset act on.
+ */
+val LocalSelectedButton = compositionLocalOf<TouchButtonId?>(defaultFactory = { null })
+
 /** Wrapper that applies per-button offset & scale, and intercepts clicks in edit mode */
 @Composable
 fun PadKitScope.TweakableButton(
@@ -51,6 +62,9 @@ fun PadKitScope.TweakableButton(
     val onEditDrag = LocalButtonDrag.current
     val isEditing = onEditSelect != null
     val isHidden = settings.isButtonHidden(id)
+    // Selected group gets a blue ring — the only press/selection feedback now that the pad is
+    // neutralized in edit mode (v1.20.7).
+    val isSelected = isEditing && LocalSelectedButton.current == id
 
     // Skip rendering if hidden (but still show in edit mode)
     if (isHidden && !isEditing) return
@@ -115,7 +129,12 @@ fun PadKitScope.TweakableButton(
         mod
     }
 
-    content(finalMod)
+    // Blue selection ring for the currently edited button group (v1.20.7).
+    val ringMod =
+        if (isSelected) Modifier.border(2.dp, Color(0xFF35B5E8), RoundedCornerShape(16.dp))
+        else Modifier
+
+    content(finalMod.then(ringMod))
 }
 
 @Composable

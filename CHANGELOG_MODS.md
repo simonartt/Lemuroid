@@ -6,6 +6,24 @@
 
 ## v1.21 - 2026-09-03
 
+### 触控编辑模式抖动/按键四分五裂修复：编辑期整盘走 PadKit 模拟通道置空 + 选中按键蓝色描边（版本升至 1.20.7-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 272 / versionName 1.20.7 / suffix -v8b**（用户 v1.20.6 真机实测 BUG）:
+
+1. **编辑触控按键时按键仍响应按下 → 拖动剧烈抖动、方向键/ABXY 四分五裂消失（BUG 根因）** — 逐层翻 PadKit 源码定位：Lemuroid 整棵虚拟按键树挂在 `PadKit(...)` 根容器下，PadKit 在根 Box 上跑自己的全局 `pointerInput` 循环（PadKit.kt），每帧 `event.changes.filter { it.pressed }` **完全不检查 isConsumed**。v1.20.5 给每个按键加的编辑手势（选中+自由拖动）在子节点上 `consume()` 了事件，但 PadKit 根循环无视消费标记，拿**同一根手指**照常做命中检测 → 按钮被算成 pressed（高亮/震动都从它内部走），且拖动时 graphicsLayer 移动按键与 PadKit 记录的 rect 错位、FaceButtons/Cross 的 `trackPointers` 锁人 → 高频翻转 = 抖动；ABXY/方向键是一个 handler 里 4 个锚点，整组随图层移动时归一化距离 >1 → 4 前景乱跳甚至集体不渲染 = "四分五裂"。
+2. **修复：编辑期用 PadKit 官方模拟通道把整盘置空** — PadKit 命中检测之后会把 `simulatedControlIds` 列出的控件状态**强制覆盖**为 `simulatedState`（官方给倾斜/测试用的通道，本项目 tilt 已在用）。进入触控编辑子模式时，把全部控件 id（`ALL_TOUCH_CONTROL_IDS`，覆盖所有系统布局的按键+方向 id 并集）塞进覆盖列表、覆盖值=空 `InputState()`（全松开）→ 该状态下：控件 pressed 恒 false（不高亮）、`InputHapticGenerator` 不再震动、`InputEventsGenerator` 不再产事件，而**编辑手势在子节点独立工作完全不受影响**。退出编辑自动回落 tilt 通道，正常游戏路径零改动。⚠️ 副作用（用户已确认接受）：编辑期所有按钮**不再有任何按下高亮**。多余 id 对当前 pad 无害（`InputState` 的 fold 是 remove from empty，不抛）。
+3. **选中按键加蓝色描边作为选中反馈** — 因副作用②编辑期完全无高亮，无法分辨当前滑杆/复位作用于哪个按键组。新增 `LocalSelectedButton` compositionLocal（MelonDS.kt 定义，Desmume.kt 同包直接引用），`TweakableButton`/`TweakableButtonDesmume` 里选中组叠 `Modifier.border(2.dp, #35B5E8, RoundedCornerShape(16dp))`；MobileGameScreen 用 `editingSelection.collectAsState` 提供值。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — 顶层新增 `ALL_TOUCH_CONTROL_IDS: Set<Id>` 常量；PadKit 调用点 `simulatedState`/`simulatedControlIds` 由 tilt 直传改为 `derivedStateOf` 包装（编辑中→全量 id+空状态，否则→原 tilt）；`CompositionLocalProvider` 增 `LocalSelectedButton provides editingSelection.value`；新增 `val editingSelection = viewModel.getEditingSelection().collectAsState(null)`；import 补 `gg.padkit.ids.Id`/`android.view.KeyEvent`/`LocalSelectedButton`/`ComposeTouchLayouts`。⚠️ 三个 `derivedStateOf` 闭包内直接读 `.value`（不能用外部捕获的 `controlsEditing` 局部 val，会闭包陈旧——但此处 derivedStateOf 会追踪读到的 state，故已删除冗余局部）。
+- `lemuroid-touchinput/.../radial/layouts/MelonDS.kt` — 新增 `LocalSelectedButton` compositionLocal；`TweakableButton` 读选中态、`content` 尾叠 `ringMod`；import 补 `border`/`RoundedCornerShape`/`Color`/`dp`。
+- `lemuroid-touchinput/.../radial/layouts/Desmume.kt` — `TweakableButtonDesmume` 同步加选中环（同包，无需 import Local）；import 补 `border`/`RoundedCornerShape`/`Color`/`dp`。
+- `lemuroid-app/build.gradle.kts` — versionCode 271→272、versionName 1.20.6→1.20.7
+
+**验证依据**：对照项目实际锁定版本 `1.0.0-beta1`（buildSrc/deps.kt）的 PadKit tag 源码逐行确认 `simulatedControlIds`/`simulatedState` 签名、`handleSimulatedInputEvents` 覆盖点、`LaunchedEffect(simulatedState.value)` 重放、pointer tracking 松手自清理均成立；与最新 main 一致。
+
+---
+
 ### 触控编辑器交互修正：预设改圆形+纯长按存 / 显隐面板并入可拖动悬浮卡片 / 底部卡片固定宽可拖+滑杆去文本（版本升至 1.20.6-v8b）
 
 **分支 `v8b-nds-editor`，versionCode 271 / versionName 1.20.6 / suffix -v8b**（用户 v1.20.5 真机实测 3 点反馈）:

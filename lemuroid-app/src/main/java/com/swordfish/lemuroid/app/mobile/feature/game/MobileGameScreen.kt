@@ -111,8 +111,46 @@ import com.swordfish.touchinput.radial.ui.GlassSurface
 import com.swordfish.touchinput.radial.ui.LemuroidButtonPressFeedback
 import gg.padkit.PadKit
 import gg.padkit.config.HapticFeedbackType
+import gg.padkit.ids.Id
 import gg.padkit.inputstate.InputState
 import timber.log.Timber
+import android.view.KeyEvent
+import com.swordfish.touchinput.radial.layouts.LocalSelectedButton
+import com.swordfish.touchinput.radial.layouts.shared.ComposeTouchLayouts
+
+/**
+ * Every control id any touch layout can register (v1.20.7). While the touch-controls editor is
+ * open, this whole set is pushed through PadKit's simulation channel with a neutral InputState.
+ * Root cause it fixes: PadKit's root pointer loop (PadKit.kt) filters only `pressed` pointers
+ * and NEVER checks consumption — so the same finger that our child-level edit gesture (select /
+ * free-drag) consumes was also hit-tested by PadKit, flickering pressed highlights, vibrating,
+ * and shattering cross/face-button groups under the dragging finger. The simulation override is
+ * applied to `scope.inputState.value` AFTER hit-detection, and controls/haptics/events all read
+ * that same state → everything goes inert while editing. Ids unused by the active pad are
+ * harmless no-ops inside InputState (fold removes from empty sets).
+ */
+private val ALL_TOUCH_CONTROL_IDS: Set<Id> = setOf(
+    Id.Key(KeyEvent.KEYCODE_BUTTON_A),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_B),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_X),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_Y),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_L1),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_L2),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_R1),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_R2),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_SELECT),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_START),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_MODE),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBL),
+    Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBR),
+    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD),
+    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_LEFT_STICK),
+    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_RIGHT_STICK),
+    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_DPAD_AND_LEFT_STICK),
+    Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_RIGHT_DPAD),
+    Id.ContinuousDirection(ComposeTouchLayouts.MOTION_SOURCE_LEFT_STICK),
+    Id.ContinuousDirection(ComposeTouchLayouts.MOTION_SOURCE_RIGHT_STICK),
+)
 
 @Composable
 fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
@@ -157,6 +195,8 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val editScreenLayoutShown = viewModel.isEditScreenLayoutShown().collectAsState(false)
         // Editor sub-mode (v1.20.5): true = touch-controls editor, false = screen-layout editor
         val editControlsMode = viewModel.isEditControlsModeShown().collectAsState(false)
+        // Selected button group in the controls editor (v1.20.7) — drives the blue ring.
+        val editingSelection = viewModel.getEditingSelection().collectAsState(initial = null)
 
         val touchGamePads = currentControllerConfig?.getTouchControllerConfig()
         val leftGamePad = touchGamePads?.leftComposable
@@ -177,6 +217,29 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val screenWidthPx = constraints.maxWidth.toFloat()
         val screenHeightPx = constraints.maxHeight.toFloat()
 
+        // Touch-controls editor (v1.20.7): neutralize the WHOLE pad through PadKit's simulation
+        // channel so its root pointer loop (which ignores consumed events) can no longer
+        // highlight / vibrate / shatter buttons under the editing finger. See ALL_TOUCH_CONTROL_IDS.
+        // NOTE: the .value reads must stay INSIDE the derivedStateOf closures — a captured local
+        // val would freeze the first composition's value (stale closure).
+        val padSimulatedIds =
+            remember {
+                derivedStateOf {
+                    if (editScreenLayoutShown.value && editControlsMode.value) {
+                        ALL_TOUCH_CONTROL_IDS + tiltSimulatedControls.value
+                    } else {
+                        tiltSimulatedControls.value
+                    }
+                }
+            }
+        val padSimulatedState =
+            remember {
+                derivedStateOf {
+                    if (editScreenLayoutShown.value && editControlsMode.value) InputState()
+                    else tiltSimulatedStates.value
+                }
+            }
+
         val fullScreenPosition = remember { mutableStateOf<Rect?>(null) }
         // Keyed by orientation: a rotation invalidates any previously frozen anchor rect
         val viewportPosition = remember(isLandscape) { mutableStateOf<Rect?>(null) }
@@ -185,8 +248,8 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
             modifier = Modifier.fillMaxSize(),
             onInputEvents = { viewModel.handleVirtualInputEvent(it) },
             hapticFeedbackType = padHapticFeedback,
-            simulatedState = tiltSimulatedStates,
-            simulatedControlIds = tiltSimulatedControls,
+            simulatedState = padSimulatedState,
+            simulatedControlIds = padSimulatedIds,
         ) {
             val localContext = LocalContext.current
             val lifecycle = LocalLifecycleOwner.current
@@ -309,6 +372,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                                 } else {
                                     null
                                 },
+                            LocalSelectedButton provides editingSelection.value,
                         ) {
                             leftGamePad?.invoke(
                                 this,
