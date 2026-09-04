@@ -419,7 +419,10 @@ abstract class BaseGameActivity : ImmersiveActivity() {
                 }
             }
             if (data?.getBooleanExtra(GameMenuContract.RESULT_EDIT_TOUCH_CONTROLS, false) == true) {
-                baseGameScreenViewModel.toggleEditControls(true)
+                // v1.20.5: the touch-button editor lives INSIDE the unified layout editor —
+                // legacy entries (TV menu / pref_game_edit_touch_controls) open it in controls mode.
+                baseGameScreenViewModel.toggleEditScreenLayout(true)
+                baseGameScreenViewModel.setEditControlsMode(true)
             }
             if (data?.getBooleanExtra(GameMenuContract.RESULT_EDIT_SCREEN_LAYOUT, false) == true) {
                 baseGameScreenViewModel.toggleEditScreenLayout(true)

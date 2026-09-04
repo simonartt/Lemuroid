@@ -33,12 +33,27 @@ class TouchControllerSettingsManager(private val sharedPreferences: SharedPrefer
         val scale: Float = 1.0f,
         val offsetX: Float = 0f,
         val offsetY: Float = 0f,
+        // Free-drag translation in PIXELS (v1.20.5), applied on top of the legacy offset.
+        // Dragging a button in the editor writes these; they let a button leave its radial
+        // anchor zone and float anywhere on screen — including over the game picture.
+        val freeX: Float = 0f,
+        val freeY: Float = 0f,
     ) {
         companion object {
             val DEFAULT = ButtonGroupSettings()
             fun reset() = DEFAULT
         }
     }
+
+    /**
+     * A named A/B/C preset: a snapshot of the per-button layout (positions/sizes/visibility).
+     * The working fields of [Settings] stay live; presets are loaded into / saved from them.
+     */
+    @Serializable
+    data class Preset(
+        val buttonSettings: Map<String, ButtonGroupSettings> = emptyMap(),
+        val hiddenButtons: Set<String> = emptySet(),
+    )
 
     @Serializable
     data class Settings(
@@ -50,6 +65,11 @@ class TouchControllerSettingsManager(private val sharedPreferences: SharedPrefer
         val buttonSettings: Map<String, ButtonGroupSettings> = emptyMap(),
         // Hidden buttons (by name)
         val hiddenButtons: Set<String> = emptySet(),
+        // A/B/C layout presets, keyed by "A"/"B"/"C" (v1.20.5). Per controller AND orientation
+        // — the whole Settings blob is already bucketed by (touchControllerID, orientation).
+        val presets: Map<String, Preset> = emptyMap(),
+        // Which preset the working fields currently mirror ("A"/"B"/"C"), null = unsaved edits.
+        val activePreset: String? = null,
     ) {
         fun getButtonSettings(id: TouchButtonId) = buttonSettings[id.name] ?: ButtonGroupSettings()
         fun setButtonSettings(id: TouchButtonId, s: ButtonGroupSettings) = copy(buttonSettings = buttonSettings + (id.name to s))
@@ -122,15 +142,47 @@ class TouchControllerSettingsManager(private val sharedPreferences: SharedPrefer
         orientation: Orientation,
         settings: Settings,
     ) {
-        Timber.d("Updating touch settings for $touchControllerID at $orientation to $settings")
-        updateCachedSettings(touchControllerID, orientation, settings)
+        // v1.20.5: while an A/B/C preset is active, every working-field edit mirrors into it
+        // (user-pinned "auto-save into the current preset" behavior).
+        val synced = settings.activePreset?.let { name ->
+            if (settings.presets.containsKey(name)) {
+                settings.copy(
+                    presets = settings.presets + (
+                        name to Preset(settings.buttonSettings, settings.hiddenButtons)
+                        ),
+                )
+            } else {
+                settings.copy(activePreset = null)
+            }
+        } ?: settings
+        Timber.d("Updating touch settings for $touchControllerID at $orientation to $synced")
+        updateCachedSettings(touchControllerID, orientation, synced)
         withContext(Dispatchers.IO) {
             sharedPreferences.edit {
                 putString(
                     getPreferenceString(touchControllerID, orientation),
-                    Json.encodeToString(Settings.serializer(), settings),
+                    Json.encodeToString(Settings.serializer(), synced),
                 )
             }
+        }
+    }
+
+    /**
+     * Non-suspending read of the last known settings for a (controller, orientation) bucket —
+     * populated by [observeSettings]. Falls back to parsing the persisted blob on first access.
+     */
+    fun currentSettings(
+        touchControllerID: TouchControllerID,
+        orientation: Orientation,
+    ): Settings? {
+        val settingsKey = getPreferenceString(touchControllerID, orientation)
+        cachedSettings[settingsKey]?.value?.let { return it }
+        return try {
+            sharedPreferences.getString(settingsKey, null)
+                ?.let { Json.decodeFromString(Settings.serializer(), it) }
+        } catch (e: Exception) {
+            Timber.w(e, "Touch settings corrupted for key $settingsKey")
+            null
         }
     }
 

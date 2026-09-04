@@ -209,8 +209,12 @@ class ScreenLayoutManager(private val sharedPreferences: SharedPreferences) {
             if (slot != null) {
                 current.copy(topScreen = slot.topScreen, bottomScreen = slot.bottomScreen, activeSlot = lastUsed)
             } else {
-                // No saved layout for this orientation: carry over the working values as unsaved.
-                current.copy(activeSlot = null)
+                // No saved layout for this orientation (v1.20.5, Plan A): DO NOT carry the old
+                // orientation's working values over — scale/offset are relative to per-orientation
+                // natural rects, so a portrait-tuned value blows past the landscape clamp and the
+                // pair fills the whole device. Fall back to the DEFAULT layout instead; users who
+                // want to reuse a layout across orientations save it into the new orientation's slots.
+                current.copy(topScreen = ScreenTransform.DEFAULT, bottomScreen = ScreenTransform.DEFAULT, activeSlot = null)
             },
         )
     }

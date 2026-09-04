@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -15,12 +16,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -86,6 +90,7 @@ import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls.Companion.MENU_LOADING_ANIMATION_MILLIS
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
+import com.swordfish.touchinput.radial.layouts.LocalButtonDrag
 import com.swordfish.touchinput.radial.layouts.LocalButtonEdit
 import com.swordfish.lemuroid.app.shared.settings.HapticFeedbackMode
 import com.swordfish.lemuroid.lib.controller.ControllerConfig
@@ -142,6 +147,8 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         // NDS screen layout customization state
         val screenLayoutState = viewModel.getScreenLayoutState().collectAsState(null)
         val editScreenLayoutShown = viewModel.isEditScreenLayoutShown().collectAsState(false)
+        // Editor sub-mode (v1.20.5): true = touch-controls editor, false = screen-layout editor
+        val editControlsMode = viewModel.isEditControlsModeShown().collectAsState(false)
 
         val touchGamePads = currentControllerConfig?.getTouchControllerConfig()
         val leftGamePad = touchGamePads?.leftComposable
@@ -180,11 +187,12 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 modifier =
                     Modifier
                         .fillMaxSize()
-                        // Hide the game picture while the layout editor is open: the user edits
-                        // against the dashed frames only (the frozen frame would drift out of
-                        // sync with them). Alpha keeps the view alive so GLRetroView is not
-                        // recreated and fullScreenPosition stays valid.
-                        .alpha(if (editScreenLayoutShown.value) 0f else 1f)
+                        // Hide the game picture while the SCREEN-LAYOUT editor is open: the user
+                        // edits against the dashed frames only. In CONTROLS edit mode (v1.20.5) the
+                        // picture stays visible so buttons can be placed over it. Alpha keeps the
+                        // view alive so GLRetroView is not recreated and fullScreenPosition stays
+                        // valid.
+                        .alpha(if (editScreenLayoutShown.value && !editControlsMode.value) 0f else 1f)
                         .onGloballyPositioned { fullScreenPosition.value = it.boundsInRoot() },
                 factory = {
                     viewModel.createRetroView(localContext, lifecycle)
@@ -260,13 +268,20 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                         currentControllerConfig != null &&
                         touchControlsVisibleState.value
 
+                // Unified editor state (v1.20.5): the editor has two sub-modes —
+                // screen layout (NDS dashed frames) and touch controls (button editor).
+                val inControlsEdit = editScreenLayoutShown.value && editControlsMode.value
+
                 if (isVisible) {
                     CompositionLocalProvider(LocalLemuroidPadTheme provides LemuroidPadTheme()) {
-                        if (!isLandscape) {
+                        if (!isLandscape && !inControlsEdit) {
                             PadContainer(
                                 modifier = Modifier.layoutId(GameScreenLayout.CONSTRAINTS_BOTTOM_CONTAINER),
                             )
-                        } else if (!currentControllerConfig.allowTouchOverlay) {
+                        } else if (!isLandscape && inControlsEdit) {
+                            // Controls edit mode: hide the glass pad background so buttons can
+                            // be judged against the game picture itself.
+                        } else if (!currentControllerConfig.allowTouchOverlay && !inControlsEdit) {
                             PadContainer(
                                 modifier = Modifier.layoutId(GameScreenLayout.CONSTRAINTS_LEFT_CONTAINER),
                             )
@@ -275,16 +290,29 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                             )
                         }
 
-                        leftGamePad?.invoke(
-                            this,
-                            Modifier.layoutId(GameScreenLayout.CONSTRAINTS_LEFT_PAD),
-                            touchControllerSettings,
-                        )
-                        rightGamePad?.invoke(
-                            this,
-                            Modifier.layoutId(GameScreenLayout.CONSTRAINTS_RIGHT_PAD),
-                            touchControllerSettings,
-                        )
+                        // In controls edit mode the pads receive select/drag callbacks instead of
+                        // game input (input is blocked VM-side while editing).
+                        CompositionLocalProvider(
+                            LocalButtonEdit provides
+                                if (inControlsEdit) ({ target: TouchButtonId -> viewModel.selectEditTarget(target) }) else null,
+                            LocalButtonDrag provides
+                                if (inControlsEdit) {
+                                    ({ id: TouchButtonId, dx: Float, dy: Float -> viewModel.updateButtonFreeDrag(id, dx, dy) })
+                                } else {
+                                    null
+                                },
+                        ) {
+                            leftGamePad?.invoke(
+                                this,
+                                Modifier.layoutId(GameScreenLayout.CONSTRAINTS_LEFT_PAD),
+                                touchControllerSettings,
+                            )
+                            rightGamePad?.invoke(
+                                this,
+                                Modifier.layoutId(GameScreenLayout.CONSTRAINTS_RIGHT_PAD),
+                                touchControllerSettings,
+                            )
+                        }
 
                         GameScreenRunningCentralMenu(
                             modifier = Modifier.layoutId(GameScreenLayout.CONSTRAINTS_GAME_CONTAINER),
@@ -306,8 +334,17 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
 
         // NDS screen layout editor overlay (works with or without touch controls visible).
         // Composed after DraggableMenuButton so its touches reach the editor first.
+        // v1.20.5: when the controls sub-mode is active, the touch-button editor takes over
+        // (full-screen overlay with top A/B/C presets, bottom size slider, left visibility list).
         val layoutState = screenLayoutState.value
-        if (editScreenLayoutShown.value && layoutState != null) {
+        if (editScreenLayoutShown.value && editControlsMode.value && touchControllerSettings != null) {
+            TouchControlsEditorOverlay(
+                viewModel = viewModel,
+                touchControllerSettings = touchControllerSettings,
+                screenWidthPx = screenWidthPx,
+                screenHeightPx = screenHeightPx,
+            )
+        } else if (editScreenLayoutShown.value && layoutState != null) {
             ScreenLayoutEditorOverlay(
                 viewModel = viewModel,
                 layoutState = layoutState,
@@ -354,164 +391,228 @@ private fun GameScreenRunningCentralMenu(
     controllerConfig: ControllerConfig,
 ) {
     val menuPressed = viewModel.isMenuPressed().collectAsState(false)
-    CompositionLocalProvider(LocalButtonEdit provides { target -> viewModel.selectEditTarget(target) }) {
-        Box(
-            modifier = modifier.wrapContentSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            LemuroidButtonPressFeedback(
-                pressed = menuPressed.value,
-                animationDurationMillis = MENU_LOADING_ANIMATION_MILLIS,
-                icon = R.drawable.button_menu,
-            )
-            MenuEditTouchControls(viewModel, controllerConfig, touchControllerSettings)
-        }
+    Box(
+        modifier = modifier.wrapContentSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        LemuroidButtonPressFeedback(
+            pressed = menuPressed.value,
+            animationDurationMillis = MENU_LOADING_ANIMATION_MILLIS,
+            icon = R.drawable.button_menu,
+        )
     }
 }
 
-@androidx.compose.material3.ExperimentalMaterial3Api
+/**
+ * Touch-button editor overlay (v1.20.5) — replaces the old dropdown Card. The buttons themselves
+ * are dragged directly on the game picture (via LocalButtonDrag); this overlay only supplies the
+ * surrounding controls:
+ *   • TOP bar: A / B / C preset chips — tap loads a preset, long-press saves the current layout
+ *     into it. The active preset is highlighted. (Non-NDS too: same editor everywhere.)
+ *   • BOTTOM bar (above the device bottom): a size slider for the currently selected button, plus
+ *     复位此按键 / 全部复位 / 返回屏幕布局(NDS only) / 退出 buttons.
+ *   • LEFT fixed vertical panel: one row per button = small slide switch + button label, toggling
+ *     that button's visibility. Panel position is fixed regardless of the selection.
+ * Hidden buttons still render (dimmed) in edit mode so they can be re-enabled.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun MenuEditTouchControls(
+private fun TouchControlsEditorOverlay(
     viewModel: BaseGameScreenViewModel,
-    controllerConfig: ControllerConfig,
     touchControllerSettings: TouchControllerSettingsManager.Settings,
+    screenWidthPx: Float,
+    screenHeightPx: Float,
 ) {
-    val showEditControls = viewModel.isEditControlShown().collectAsState(false)
     val selectedButton = viewModel.getEditingSelection().collectAsState(null)
-    if (!showEditControls.value) return
-
     val allButtons = TouchButtonId.values().toList()
+    val isNds = viewModel.isNdsSystem()
 
-    // Dropdown state
-    var expanded = remember { mutableStateOf(false) }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // (A) LEFT fixed visibility panel — switch + label per button.
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier =
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 8.dp)
+                    .width(150.dp)
+                    .background(Color(0xE6252528), RoundedCornerShape(10.dp))
+                    .padding(vertical = 8.dp, horizontal = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            // Button selector — Exposed Dropdown Menu
-            androidx.compose.material3.ExposedDropdownMenuBox(
-                expanded = expanded.value,
-                onExpandedChange = { expanded.value = !expanded.value },
-            ) {
-                androidx.compose.material3.TextField(
-                    value = selectedButton.value?.label ?: "选择要调节的按键",
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = { androidx.compose.material3.ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded.value) },
-                    modifier = Modifier
-                        .menuAnchor()
-                        .fillMaxWidth(),
-                    textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    ),
-                )
-                androidx.compose.material3.DropdownMenu(
-                    expanded = expanded.value,
-                    onDismissRequest = { expanded.value = false },
+            Text(
+                text = "显示",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
+            )
+            for (btn in allButtons) {
+                val visible = !touchControllerSettings.isButtonHidden(btn)
+                val active = selectedButton.value == btn
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (active) Modifier.background(Color(0x2235b5e8), RoundedCornerShape(6.dp))
+                                else Modifier,
+                            )
+                            .clickable { viewModel.selectEditTarget(btn) }
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    allButtons.forEach { btn ->
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(btn.label) },
-                            onClick = {
-                                viewModel.selectEditTarget(btn)
-                                expanded.value = false
-                            },
+                    MiniToggle(
+                        on = visible,
+                        onToggle = { nv -> viewModel.toggleButtonVisibility(btn, !nv) },
+                    )
+                    Text(
+                        text = btn.label,
+                        color = if (visible) Color.White else Color.White.copy(alpha = 0.45f),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+
+        // (B) TOP A/B/C preset chips.
+        Row(
+            modifier =
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            for (name in listOf("A", "B", "C")) {
+                val saved = viewModel.isTouchPresetSaved(name)
+                val active = touchControllerSettings.activePreset == name
+                Box(
+                    modifier =
+                        Modifier
+                            .size(56.dp, 40.dp)
+                            .background(
+                                if (active) Color(0xFF35b5e8) else Color(0xE6252528),
+                                RoundedCornerShape(10.dp),
+                            )
+                            .border(
+                                1.5.dp,
+                                if (active) Color.White else Color(0xFF35b5e8),
+                                RoundedCornerShape(10.dp),
+                            )
+                            .combinedClickable(
+                                onClick = { if (saved) viewModel.loadTouchPreset(name) else viewModel.saveTouchPreset(name) },
+                                onLongClick = { viewModel.saveTouchPreset(name) },
+                            ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = name,
+                            color = if (active) Color.White else Color(0xFF35b5e8),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = if (saved) "已存" else "空",
+                            color = if (active) Color.White.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.4f),
+                            fontSize = 8.sp,
                         )
                     }
                 }
             }
+        }
+        // Hint for the preset interaction, right under the chips.
+        Text(
+            text = "点按载入 / 长按保存",
+            color = Color.White.copy(alpha = 0.5f),
+            fontSize = 10.sp,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 54.dp),
+        )
 
-            if (selectedButton.value != null) {
-                val id = selectedButton.value!!
+        // (C) BOTTOM bar — size slider for the selected button + action buttons.
+        Column(
+            modifier =
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Color(0xE6252528))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            val id = selectedButton.value
+            if (id != null) {
                 val bs = touchControllerSettings.getButtonSettings(id)
-                val isHidden = touchControllerSettings.isButtonHidden(id)
-
-                // Size slider
-                MenuEditTouchControlRow(Icons.Default.OpenInFull, "大小", 0f) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${id.label} · 大小",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier.width(96.dp),
+                    )
                     Slider(
                         value = bs.scale,
                         onValueChange = { viewModel.updateButtonScale(id, it) },
                         valueRange = 0.5f..2f,
+                        modifier = Modifier.weight(1f),
                     )
                 }
-                // Offset X
-                MenuEditTouchControlRow(Icons.Filled.ArrowBack, "水平", 0f) {
-                    Slider(
-                        value = bs.offsetX,
-                        onValueChange = {
-                            viewModel.updateButtonOffset(id, it - bs.offsetX, 0f)
-                        },
-                        valueRange = -3f..3f,
-                    )
-                }
-                // Offset Y
-                MenuEditTouchControlRow(Icons.Default.ArrowDownward, "垂直", 0f) {
-                    Slider(
-                        value = bs.offsetY,
-                        onValueChange = {
-                            viewModel.updateButtonOffset(id, 0f, it - bs.offsetY)
-                        },
-                        valueRange = -3f..3f,
-                    )
-                }
-                // Visibility toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("显示此按键", modifier = Modifier.padding(start = 4.dp))
-                    androidx.compose.material3.Switch(
-                        checked = !isHidden,
-                        onCheckedChange = { viewModel.toggleButtonVisibility(id, !it) },
-                    )
-                }
-                // Reset & Done — ALWAYS show "全部复位"
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { viewModel.resetButtonSettings(id) }) { Text("复位此按键") }
-                    TextButton(onClick = { viewModel.resetTouchControls() }) { Text("全部复位") }
-                    TextButton(onClick = { viewModel.toggleEditControls(false) }) { Text("完成") }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { viewModel.resetButtonSettings(id) }) {
+                        Text("复位此按键", color = Color.White, fontSize = 12.sp)
+                    }
                 }
             } else {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    TextButton(onClick = { viewModel.resetTouchControls() }) { Text("全部复位") }
-                    TextButton(onClick = { viewModel.toggleEditControls(false) }) { Text("完成") }
+                Text(
+                    text = "按住屏幕上的按键可拖动位置，点选后可调大小",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(vertical = 6.dp),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { viewModel.resetTouchControls() }) {
+                    Text("全部复位", color = Color.White, fontSize = 12.sp)
+                }
+                if (isNds) {
+                    TextButton(onClick = { viewModel.setEditControlsMode(false) }) {
+                        Text("返回屏幕布局", color = Color(0xFF35b5e8), fontSize = 12.sp)
+                    }
+                }
+                TextButton(onClick = { viewModel.exitLayoutEditor() }) {
+                    Text(if (isNds) "退出编辑" else "完成", color = Color.White, fontSize = 12.sp)
                 }
             }
         }
     }
 }
 
+/** Small pill slide switch for the left visibility panel (same look as ScreenEnableToggle). */
 @Composable
-private fun MenuEditTouchControlRow(
-    icon: ImageVector,
-    label: String,
-    rotation: Float,
-    slider: @Composable () -> Unit,
+private fun MiniToggle(
+    on: Boolean,
+    onToggle: (Boolean) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Box(
+        modifier =
+            Modifier
+                .size(36.dp, 18.dp)
+                .background(
+                    if (on) Color(0xFF35b5e8) else Color(0xFF606066),
+                    RoundedCornerShape(9.dp),
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.7f), RoundedCornerShape(9.dp))
+                .clickable { onToggle(!on) },
     ) {
-        Icon(
-            modifier = Modifier.rotate(rotation),
-            imageVector = icon,
-            contentDescription = label,
+        Box(
+            modifier =
+                Modifier
+                    .align(if (on) Alignment.CenterEnd else Alignment.CenterStart)
+                    .padding(2.dp)
+                    .size(14.dp)
+                    .background(Color.White, CircleShape),
         )
-        slider()
     }
 }
-
 /** NDS single-screen resolution in native pixels — the 1x zoom button's target size. */
 private const val NDS_SCREEN_WIDTH = 256f
 private const val NDS_SCREEN_HEIGHT = 192f
@@ -1097,13 +1198,16 @@ private fun ScreenLayoutEditorOverlay(
                 val selRect =
                     if (selectedScreen.value == ScreenLayoutManager.ScreenId.TOP) topRect else bottomRect
                 val selEnabled = layoutState.transformOf(selectedScreen.value).enabled
+                // Pinned INSIDE the frame's top-right corner (v1.20.5) — never escapes the
+                // dashed frame or the device screen, even when the frame hugs an edge.
+                val toggleInset = 4.dp.toPx()
                 Box(
                     modifier =
                         Modifier
                             .offset {
                                 IntOffset(
-                                    (selRect.left - fullPos.left).toInt(),
-                                    (selRect.top - fullPos.top - 30.dp.toPx()).toInt().coerceAtLeast(0),
+                                    (selRect.right - fullPos.left - 44.dp.toPx() - toggleInset).toInt(),
+                                    (selRect.top - fullPos.top + toggleInset).toInt(),
                                 )
                             }
                             .padding(2.dp),
@@ -1201,6 +1305,10 @@ private fun ScreenLayoutEditorOverlay(
                     layoutState = layoutState,
                     isLandscape = isLandscape,
                     onDismiss = { menuOpen.value = false },
+                    onEditTouchControls = {
+                        menuOpen.value = false
+                        viewModel.setEditControlsMode(true)
+                    },
                     onReturnToGameMenu = {
                         menuOpen.value = false
                         viewModel.toggleEditScreenLayout(false)
@@ -1324,6 +1432,7 @@ private fun ScreenLayoutSubmenu(
     layoutState: ScreenLayoutManager.ScreenLayoutState,
     isLandscape: Boolean,
     onDismiss: () -> Unit,
+    onEditTouchControls: () -> Unit,
     onReturnToGameMenu: () -> Unit,
 ) {
     val orientation =
@@ -1401,8 +1510,17 @@ private fun ScreenLayoutSubmenu(
                     }
                 }
             }
+            // v1.20.5: the touch-button editor moved from the game menu into this sub-menu.
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                TextButton(onClick = onEditTouchControls) {
+                    Text("编辑触控按键", color = Color(0xFF35b5e8), fontSize = 13.sp)
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
             ) {
                 TextButton(onClick = onReturnToGameMenu) {

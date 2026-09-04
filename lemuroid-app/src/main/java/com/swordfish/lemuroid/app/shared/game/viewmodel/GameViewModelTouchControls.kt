@@ -130,8 +130,9 @@ class GameViewModelTouchControls(
     }
 
     fun handleVirtualInputEvent(events: List<InputEvent>) {
-        // Block all game input while in edit mode
-        if (editingSelection.value != null) return
+        // Block all game input while the controls editor is open — button presses there are
+        // editing gestures (select / free-drag), never game input (v1.20.5).
+        if (showEditControls.value || editingSelection.value != null) return
 
         val menuEvent = events.firstOrNull { it is InputEvent.Button && it.id == KeyEvent.KEYCODE_BUTTON_MODE }
         if (menuEvent != null) {
@@ -243,11 +244,7 @@ class GameViewModelTouchControls(
 
     fun updateButtonScale(id: TouchButtonId, newScale: Float) {
         scope.launch {
-            val s = touchControllerSettingsManager.observeSettings(
-                touchControlId.value, screenOrientation.value,
-                androidx.compose.ui.unit.Density(1f, 1f),
-                androidx.compose.foundation.layout.WindowInsets(0),
-            ).first()
+            val s = currentSettings()
             val bs = s.getButtonSettings(id)
             touchControllerSettingsManager.storeSettings(
                 touchControlId.value, screenOrientation.value,
@@ -255,6 +252,66 @@ class GameViewModelTouchControls(
             )
         }
     }
+
+    /**
+     * Adds a free-drag delta (PIXELS) to one button (v1.20.5). freeX/freeY stack on top of the
+     * legacy relative offset, so a button can leave its radial zone and float anywhere — over the
+     * game picture included. The manager auto-mirrors edits into the active A/B/C preset.
+     */
+    fun updateButtonFreeDrag(id: TouchButtonId, dxPx: Float, dyPx: Float) {
+        scope.launch {
+            val s = currentSettings()
+            val bs = s.getButtonSettings(id)
+            val maxFree = 4000f
+            val newFx = (bs.freeX + dxPx).coerceIn(-maxFree, maxFree)
+            val newFy = (bs.freeY + dyPx).coerceIn(-maxFree, maxFree)
+            if (newFx == bs.freeX && newFy == bs.freeY) return@launch
+            touchControllerSettingsManager.storeSettings(
+                touchControlId.value, screenOrientation.value,
+                s.setButtonSettings(id, bs.copy(freeX = newFx, freeY = newFy)),
+            )
+        }
+    }
+
+    /** Loads an A/B/C preset into the working fields (tap on the editor's top bar). */
+    fun loadTouchPreset(name: String) {
+        scope.launch {
+            val s = currentSettings()
+            val preset = s.presets[name] ?: return@launch
+            touchControllerSettingsManager.storeSettings(
+                touchControlId.value, screenOrientation.value,
+                s.copy(
+                    buttonSettings = preset.buttonSettings,
+                    hiddenButtons = preset.hiddenButtons,
+                    activePreset = name,
+                ),
+            )
+        }
+    }
+
+    /** Saves the current working fields INTO an A/B/C preset (long-press on the editor's top bar). */
+    fun saveTouchPreset(name: String) {
+        scope.launch {
+            val s = currentSettings()
+            val preset = TouchControllerSettingsManager.Preset(s.buttonSettings, s.hiddenButtons)
+            touchControllerSettingsManager.storeSettings(
+                touchControlId.value, screenOrientation.value,
+                s.copy(presets = s.presets + (name to preset), activePreset = name),
+            )
+        }
+    }
+
+    /** Which preset (if any) the working area currently mirrors. */
+    fun activeTouchPreset(): String? = currentSettings().activePreset
+
+    /** Names of the presets that exist for the current controller + orientation. */
+    fun savedTouchPresets(): Set<String> = currentSettings().presets.keys
+
+    private fun currentSettings(): TouchControllerSettingsManager.Settings =
+        touchControllerSettingsManager.currentSettings(
+            touchControlId.value,
+            screenOrientation.value,
+        ) ?: TouchControllerSettingsManager.Settings()
 
     fun resetButtonSettings(id: TouchButtonId) {
         scope.launch {

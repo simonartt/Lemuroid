@@ -1,12 +1,12 @@
 package com.swordfish.touchinput.radial.layouts
 
 import android.view.KeyEvent
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
-import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import com.swordfish.touchinput.controller.R
 import com.swordfish.touchinput.radial.controls.LemuroidControlButton
@@ -38,27 +38,60 @@ fun PadKitScope.TweakableButtonDesmume(
 ) {
     val bs = settings.getButtonSettings(id)
     val onEditSelect = LocalButtonEdit.current
+    val onEditDrag = LocalButtonDrag.current
     val isEditing = onEditSelect != null
+    val isHidden = settings.isButtonHidden(id)
 
-    if (settings.isButtonHidden(id) && !isEditing) return
+    if (isHidden && !isEditing) return
 
-    val baseMod = if (bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f) {
-        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX
-        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY
+    // pointerInput captures its block once — read the latest callbacks through updated states.
+    val selectLatest = rememberUpdatedState(onEditSelect)
+    val dragLatest = rememberUpdatedState(onEditDrag)
+
+    val baseMod = if (bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f || bs.freeX != 0f || bs.freeY != 0f) {
+        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX
+        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY
         Modifier.graphicsLayer(
             translationX = ox,
             translationY = oy,
             scaleX = bs.scale,
             scaleY = bs.scale,
+            alpha = if (isHidden) 0.4f else 1f,
         )
     } else {
-        Modifier
+        Modifier.then(
+            if (isHidden) Modifier.graphicsLayer(alpha = 0.4f) else Modifier,
+        )
     }
     val mod = modifier.then(baseMod)
 
     val finalMod = if (isEditing) {
-        mod.pointerInput(Unit) {
-            detectTapGestures(onTap = { onEditSelect(id) })
+        mod.pointerInput(id) {
+            awaitPointerEventScope {
+                while (true) {
+                    val ev = awaitPointerEvent()
+                    val down = ev.changes.firstOrNull { it.changedToDown() && !it.isConsumed }
+                    if (down == null) continue
+                    selectLatest.value?.invoke(id)
+                    down.consume()
+                    val downId = down.id
+                    var lastX = down.position.x
+                    var lastY = down.position.y
+                    while (true) {
+                        val move = awaitPointerEvent()
+                        val ch = move.changes.firstOrNull { it.id == downId } ?: break
+                        if (!ch.pressed) break
+                        val dx = ch.position.x - lastX
+                        val dy = ch.position.y - lastY
+                        lastX = ch.position.x
+                        lastY = ch.position.y
+                        if (dx != 0f || dy != 0f) {
+                            dragLatest.value?.invoke(id, dx, dy)
+                        }
+                        ch.consume()
+                    }
+                }
+            }
         }
     } else {
         mod

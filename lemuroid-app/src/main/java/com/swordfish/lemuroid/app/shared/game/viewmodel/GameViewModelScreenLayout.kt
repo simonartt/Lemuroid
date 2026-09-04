@@ -10,8 +10,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * ViewModel-side holder for the NDS screen layout customizer.
- * All functionality is gated behind [isNdsSystem] so non-NDS cores are never affected.
+ * ViewModel-side holder for the layout editor.
+ * Two modes share one editor state (v1.20.5): SCREEN layout (NDS dashed frames) and CONTROLS
+ * (touch button editor). Non-NDS systems open directly in CONTROLS mode; NDS starts in SCREEN
+ * mode and can switch to CONTROLS via the bottom-bar sub-menu.
  */
 class GameViewModelScreenLayout(
     private val screenLayoutManager: ScreenLayoutManager,
@@ -19,14 +21,23 @@ class GameViewModelScreenLayout(
     private val scope: CoroutineScope,
 ) {
     private val showEditor = MutableStateFlow(false)
+    private val controlsMode = MutableStateFlow(false)
 
     fun isNds() = isNdsSystem
 
     fun isEditorShown(): Flow<Boolean> = showEditor
 
+    fun isControlsModeShown(): Flow<Boolean> = controlsMode
+
+    fun setControlsMode(on: Boolean) {
+        controlsMode.value = on
+    }
+
+    fun isControlsMode(): Boolean = controlsMode.value
+
     fun toggleEditor(show: Boolean) {
-        if (!isNdsSystem) return
         showEditor.value = show
+        if (!show) controlsMode.value = false
     }
 
     fun getLayoutState(): Flow<ScreenLayoutState> = screenLayoutManager.observeState()

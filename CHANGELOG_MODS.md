@@ -6,6 +6,26 @@
 
 ## v1.21 - 2026-09-03
 
+### v1.20.5：旋转铺满修复（方案A）+ 启用开关挪框内右上角 + 触控按键绝对定位/预设 A|B|C + 编辑入口全系统统一（版本升至 1.20.5-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 270 / versionName 1.20.5 / suffix -v8b**（用户 v1.20.4 实测反馈 + 触控编辑大改，经 A/B/C 三点确认）:
+
+1. **旋转到无保存槽的方向 → 重置默认布局（BUG 修复，方案 A）** — 根因：`onOrientationChanged` 在无槽方向直接继承旧方向工作值，而 scale/offset 是**相对各方向自然框**的，竖屏调好的值带到横屏成脏数据 + 全屏钳制把框拍满设备屏。现 else 分支改 `topScreen/bottomScreen = ScreenTransform.DEFAULT, activeSlot = null`。想跨方向复用布局请用槽位保存/载入。
+2. **每屏启用开关位置：虚线框内左上角 → 内部右上角（4dp 内缩）** — 用户指定；`ScreenEnableToggle` 定位改 `top-right + 4dp`。
+3. **触控按键绝对自由定位** — `ButtonGroupSettings` 新增 `freeX/freeY`（像素，叠加在 legacy offset 之上，±4000px 夹取），编辑中按住按钮拖动写 freeX/freeY → 按钮可拖离径向锚点区、**浮到游戏画面上方任意位置**（默认布局不变，只是"可搬走"，用户 C 确认）。`graphicsLayer` translation 应用之。
+4. **触控编辑新交互（全系统一套 UI）** — 进入"编辑触控按键"模式后：按住按钮=选中+拖动；设备底部滑杆=当前按钮大小 0.5–2x（+复位）；左侧固定竖排面板=每按钮显示/隐藏开关（MiniToggle）+名称；顶部 A/B/C 三 chips=**点按载入预设 / 长按把当前布局存入该槽**，任何编辑自动镜像进当前激活方案（`storeSettings` 内 sync），手动编辑后 `activePreset=null`。预设按 (controller, orientation) 分桶持久化（`Settings.presets`）。
+5. **编辑入口统一化** — 游戏菜单删独立"编辑触控按键"项：NDS/GBA/3DS 一律走布局编辑器 → 底栏"菜单"子菜单 →"编辑触控按键"；非 NDS 系统点"编辑布局"直接进触控编辑模式（`toggleEditScreenLayout` 双模式）。`BaseGameActivity` 旧 `RESULT_EDIT_TOUCH_CONTROLS` 通道移除。
+
+**修改文件**:
+- `lemuroid-app/.../shared/game/screenlayout/ScreenLayoutManager.kt` — `onOrientationChanged` else→DEFAULT（方案A）
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `ScreenEnableToggle` 右上角；`TouchControlsEditorOverlay`（左侧显隐面板/顶部 A|B|C chips/底部大小滑杆/返回屏幕布局/退出编辑）；pads 树注入 `LocalButtonEdit/LocalButtonDrag`
+- `lemuroid-app/.../shared/game/viewmodel/GameViewModelTouchControls.kt` — `updateButtonFreeDrag/loadTouchPreset/saveTouchPreset/reportSettings`（非挂起 latestSettings 缓存）
+- `lemuroid-app/.../shared/game/BaseGameScreenViewModel.kt` — `toggleEditScreenLayout` 双模式、`setEditControlsMode`、`exitLayoutEditor`
+- `lemuroid-app/.../mobile/feature/gamemenu/GameMenuHomeScreen.kt` + `shared/game/BaseGameActivity.kt` — 删旧触控编辑入口
+- `lemuroid-touchinput/.../settings/TouchControllerSettingsManager.kt` — `freeX/freeY`、`Preset`、`presets`+`activePreset`、storeSettings 自动镜像、`currentSettings` 非挂起读
+- `lemuroid-touchinput/.../layouts/MelonDS.kt / Desmume.kt / GBA.kt / GB.kt` — `TweakableButton` 重写（按下选中+拖动 onEditDrag），各布局按钮接入
+- `lemuroid-app/build.gradle.kts` — versionCode 269→270、versionName 1.20.4→1.20.5
+
 ### NDS 编辑器：宽度按钮改相对语义 + 横屏左右对齐修复 + 移除双指捏合 + 全屏钳制 + 每屏启用开关（版本升至 1.20.4-v8b）
 
 **分支 `v8b-nds-editor`，versionCode 269 / versionName 1.20.4 / suffix -v8b**（用户 v1.20.3 实测反馈 + 新功能）:

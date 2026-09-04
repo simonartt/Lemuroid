@@ -271,17 +271,54 @@ class BaseGameScreenViewModel(
     fun toggleEditScreenLayout(show: Boolean) {
         screenLayout.toggleEditor(show)
         if (show) {
-            // Hide virtual controls while editing the layout; remember the prior state.
+            // Save the pre-edit pad visibility BEFORE anything toggles it.
             touchControlsVisibleBeforeEdit = touchControls.isTouchControllerVisibleValue()
-            touchControls.setTouchControllerVisible(false)
-            // Freeze the game while the layout editor is open.
+            if (!screenLayout.isNds()) {
+                // Non-NDS systems have no screen layout to edit — open straight into the
+                // unified controls editor (v1.20.5, one entry/mode for all systems).
+                setEditControlsMode(true)
+            } else {
+                // Screen-layout mode hides the virtual pads; the user edits dashed frames.
+                touchControls.setTouchControllerVisible(false)
+            }
+            // Freeze the game while the editor is open.
             retroGameView.retroGameView?.pauseEmulation()
         } else {
+            screenLayout.setControlsMode(false)
+            touchControls.toggleEditControls(false)
             retroGameView.retroGameView?.resumeEmulation()
             // Restore virtual controls to the state they were in before editing.
             touchControls.setTouchControllerVisible(touchControlsVisibleBeforeEdit)
         }
     }
+
+    /** Editor sub-mode: true = touch-controls editor, false = NDS screen-layout editor. */
+    fun isEditControlsModeShown(): Flow<Boolean> = screenLayout.isControlsModeShown()
+
+    /** Switch between the screen-layout and controls sub-editors while the editor is open. */
+    fun setEditControlsMode(on: Boolean) {
+        screenLayout.setControlsMode(on)
+        // Block game input from the pads while editing them (input guard reads showEditControls).
+        touchControls.toggleEditControls(on)
+        // The pads must be visible to edit them and hidden while dragging screen frames.
+        touchControls.setTouchControllerVisible(on)
+    }
+
+    /** Leave the unified editor entirely (both sub-modes) and return to the game. */
+    fun exitLayoutEditor() {
+        setEditControlsMode(false)
+        toggleEditScreenLayout(false)
+    }
+
+    // Touch-button free dragging & A/B/C presets (v1.20.5)
+    fun updateButtonFreeDrag(id: TouchButtonId, dxPx: Float, dyPx: Float) =
+        touchControls.updateButtonFreeDrag(id, dxPx, dyPx)
+
+    fun loadTouchPreset(name: String) = touchControls.loadTouchPreset(name)
+
+    fun saveTouchPreset(name: String) = touchControls.saveTouchPreset(name)
+
+    fun isTouchPresetSaved(name: String): Boolean = touchControls.savedTouchPresets().contains(name)
 
     fun getScreenLayoutState(): Flow<ScreenLayoutManager.ScreenLayoutState> = screenLayout.getLayoutState()
 

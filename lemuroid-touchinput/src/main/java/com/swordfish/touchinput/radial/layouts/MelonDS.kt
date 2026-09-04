@@ -1,13 +1,14 @@
 package com.swordfish.touchinput.radial.layouts
 
 import android.view.KeyEvent
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import com.swordfish.touchinput.controller.R
 import com.swordfish.touchinput.radial.controls.LemuroidControlButton
@@ -31,6 +32,12 @@ import kotlinx.collections.immutable.persistentMapOf
 /** CompositionLocal to pass edit-mode callback into the PadKit tree */
 val LocalButtonEdit = compositionLocalOf<((TouchButtonId) -> Unit)?>(defaultFactory = { null })
 
+/**
+ * CompositionLocal carrying the edit-mode drag callback (dx/dy in PIXELS): moving the selected
+ * button writes into its ButtonGroupSettings.freeX/freeY (v1.20.5). Null outside edit mode.
+ */
+val LocalButtonDrag = compositionLocalOf<((TouchButtonId, Float, Float) -> Unit)?>(defaultFactory = { null })
+
 /** Wrapper that applies per-button offset & scale, and intercepts clicks in edit mode */
 @Composable
 fun PadKitScope.TweakableButton(
@@ -41,29 +48,68 @@ fun PadKitScope.TweakableButton(
 ) {
     val bs = settings.getButtonSettings(id)
     val onEditSelect = LocalButtonEdit.current
+    val onEditDrag = LocalButtonDrag.current
     val isEditing = onEditSelect != null
+    val isHidden = settings.isButtonHidden(id)
 
     // Skip rendering if hidden (but still show in edit mode)
-    if (settings.isButtonHidden(id) && !isEditing) return
+    if (isHidden && !isEditing) return
 
-    // Build modifier: base + graphicsLayer for customization + pointerInput for edit mode
-    val baseMod = if (bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f) {
-        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX
-        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY
+    // pointerInput captures its block ONCE per key — hold the latest callbacks in updated
+    // states so the drag loop never invokes a stale closure.
+    val selectLatest = rememberUpdatedState(onEditSelect)
+    val dragLatest = rememberUpdatedState(onEditDrag)
+
+    // Build modifier: base + graphicsLayer for customization + pointerInput for edit mode.
+    // freeX/freeY are PIXEL translations from free dragging (v1.20.5) and stack on top of the
+    // legacy relative offset inside the same graphicsLayer.
+    val baseMod = if (bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f || bs.freeX != 0f || bs.freeY != 0f) {
+        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX
+        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY
         Modifier.graphicsLayer(
             translationX = ox,
             translationY = oy,
             scaleX = bs.scale,
             scaleY = bs.scale,
+            // Hidden buttons are shown dimmed in edit mode so they can be found and re-enabled.
+            alpha = if (isHidden) 0.4f else 1f,
         )
     } else {
-        Modifier
+        Modifier.then(
+            if (isHidden) Modifier.graphicsLayer(alpha = 0.4f) else Modifier,
+        )
     }
     val mod = modifier.then(baseMod)
 
     val finalMod = if (isEditing) {
-        mod.pointerInput(Unit) {
-            detectTapGestures(onTap = { onEditSelect(id) })
+        // Press = select; drag = move this button freely (v1.20.5). Both go through the raw
+        // pointer loop below: Compose 1.6 has no awaitFirstDown, so wait for the down manually.
+        mod.pointerInput(id) {
+            awaitPointerEventScope {
+                while (true) {
+                    val ev = awaitPointerEvent()
+                    val down = ev.changes.firstOrNull { it.changedToDown() && !it.isConsumed }
+                    if (down == null) continue
+                    selectLatest.value?.invoke(id)
+                    down.consume()
+                    val downId = down.id
+                    var lastX = down.position.x
+                    var lastY = down.position.y
+                    while (true) {
+                        val move = awaitPointerEvent()
+                        val ch = move.changes.firstOrNull { it.id == downId } ?: break
+                        if (!ch.pressed) break
+                        val dx = ch.position.x - lastX
+                        val dy = ch.position.y - lastY
+                        lastX = ch.position.x
+                        lastY = ch.position.y
+                        if (dx != 0f || dy != 0f) {
+                            dragLatest.value?.invoke(id, dx, dy)
+                        }
+                        ch.consume()
+                    }
+                }
+            }
         }
     } else {
         mod
