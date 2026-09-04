@@ -6,6 +6,18 @@
 
 ## v1.21 - 2026-09-03
 
+### 触控编辑器交互修正：预设改圆形+纯长按存 / 显隐面板并入可拖动悬浮卡片 / 底部卡片固定宽可拖+滑杆去文本（版本升至 1.20.6-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 271 / versionName 1.20.6 / suffix -v8b**（用户 v1.20.5 真机实测 3 点反馈）:
+
+1. **预设 A/B/C 改圆形 + 修点击误存（BUG）** — 旧交互 `onClick = if(saved) load else save`：点空槽会直接保存，所以表现为"点击就显示已存"；长按虽已实现但重复保存无反馈显得"没反应"。现三个圆形按钮（52dp）字母居中，**点按=仅载入**（空槽点按无动作），**长按=保存当前布局进该槽**，激活态高亮、已存显示"已存"、空槽显示"空"。下方保留"点按载入/长按保存"提示。
+2. **左侧常驻显隐面板 → 底部悬浮卡片的可展开区（防拥挤）** — 旧版左侧竖排面板列出**所有按键**的开关，遮挡按键、位置拥挤。删除该常驻面板，改为底部卡片里"显示 ▾"入口点击**下拉展开**显隐列表（每项 MiniToggle+名称，超高 220dp 内竖滚），默认收起、按需查看，不挡屏幕。（用户在"底部菜单入口"与"左侧可拖动下拉"两案间让 agent 定夺，采用二者融合：显隐做进可拖动的底部卡片。）
+3. **底部调节栏：固定宽度 + 悬浮可拖动 + 滑杆行去文本** — 由通栏 `fillMaxWidth` 改**固定 360dp** 悬浮卡片，**按住卡片背景可拖动**到屏幕任意位置（`detectDragGestures`；子控件各自消费点击，按按钮/滑杆不触发拖动）。拖动钳制用 `rememberUpdatedState` 读最新边界（避免首帧 `cardSize=0` 闭包陈旧）。滑杆行去掉"X·大小"标签文本，结构=**左复位按钮 + 右滑杆**。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `TouchControlsEditorOverlay` 整体重写：A/B/C 圆形 `combinedClickable`（onClick 仅 saved 才 load）、`cardOffset`/`cardSize`/`visibilityExpanded` 状态、卡片 `.align(BottomCenter).offset{cardOffset}.width(360.dp).onSizeChanged{}` + `pointerInput(Unit){detectDragGestures}` 拖背景、滑杆行 `[复位][Slider weight1]`、展开式显隐列表；新增 import `detectDragGestures`/`rememberScrollState`/`verticalScroll`/`heightIn`/`getValue`/`setValue`/`IntSize`/`onSizeChanged`（`rememberUpdatedState` 已存在）。⚠️ TextButton `contentPadding` 是 `PaddingValues`（非 `Padding`），全限定名写死避 import。
+- `lemuroid-app/build.gradle.kts` — versionCode 270→271、versionName 1.20.5→1.20.6
+
 ### v1.20.5：旋转铺满修复（方案A）+ 启用开关挪框内右上角 + 触控按键绝对定位/预设 A|B|C + 编辑入口全系统统一（版本升至 1.20.5-v8b）
 
 **分支 `v8b-nds-editor`，versionCode 270 / versionName 1.20.5 / suffix -v8b**（用户 v1.20.4 实测反馈 + 触控编辑大改，经 A/B/C 三点确认）:

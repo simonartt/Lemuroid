@@ -8,7 +8,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -52,6 +56,8 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -75,11 +81,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -404,15 +412,18 @@ private fun GameScreenRunningCentralMenu(
 }
 
 /**
- * Touch-button editor overlay (v1.20.5) — replaces the old dropdown Card. The buttons themselves
- * are dragged directly on the game picture (via LocalButtonDrag); this overlay only supplies the
- * surrounding controls:
- *   • TOP bar: A / B / C preset chips — tap loads a preset, long-press saves the current layout
- *     into it. The active preset is highlighted. (Non-NDS too: same editor everywhere.)
- *   • BOTTOM bar (above the device bottom): a size slider for the currently selected button, plus
- *     复位此按键 / 全部复位 / 返回屏幕布局(NDS only) / 退出 buttons.
- *   • LEFT fixed vertical panel: one row per button = small slide switch + button label, toggling
- *     that button's visibility. Panel position is fixed regardless of the selection.
+ * Touch-button editor overlay (v1.20.5, reworked in v1.20.6 per user feedback). The buttons
+ * themselves are dragged directly on the game picture (via LocalButtonDrag); this overlay only
+ * supplies the surrounding controls:
+ *   • TOP: three CIRCULAR A / B / C preset buttons, letter centered. Tap = LOAD the preset (no-op
+ *     while empty), long-press = SAVE current layout into it. Active preset highlighted, "已存"
+ *     under the letter when saved. (v1.20.6 fix: tap no longer auto-saves empty slots.)
+ *   • FLOATING CARD (bottom center initially): FIXED width, draggable anywhere by holding its
+ *     background (children consume their own touches). Contains: selected-button row with 复位
+ *     button on the LEFT + size slider on the RIGHT (no label text — v1.20.6), action row
+ *     (显示 panel toggle / 全部复位 / 返回屏幕布局 NDS-only / 退出编辑), and an EXPANDABLE
+ *     visibility section (one row per button = MiniToggle + label). The old fixed LEFT panel is
+ *     gone — it covered too many buttons (v1.20.6).
  * Hidden buttons still render (dimmed) in edit mode so they can be re-enabled.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -427,139 +438,125 @@ private fun TouchControlsEditorOverlay(
     val allButtons = TouchButtonId.values().toList()
     val isNds = viewModel.isNdsSystem()
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // (A) LEFT fixed visibility panel — switch + label per button.
-        Column(
-            modifier =
-                Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 8.dp)
-                    .width(150.dp)
-                    .background(Color(0xE6252528), RoundedCornerShape(10.dp))
-                    .padding(vertical = 8.dp, horizontal = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(
-                text = "显示",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 11.sp,
-                modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
-            )
-            for (btn in allButtons) {
-                val visible = !touchControllerSettings.isButtonHidden(btn)
-                val active = selectedButton.value == btn
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .then(
-                                if (active) Modifier.background(Color(0x2235b5e8), RoundedCornerShape(6.dp))
-                                else Modifier,
-                            )
-                            .clickable { viewModel.selectEditTarget(btn) }
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    MiniToggle(
-                        on = visible,
-                        onToggle = { nv -> viewModel.toggleButtonVisibility(btn, !nv) },
-                    )
-                    Text(
-                        text = btn.label,
-                        color = if (visible) Color.White else Color.White.copy(alpha = 0.45f),
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                    )
-                }
-            }
-        }
+    // Floating editor card (v1.20.6): fixed width, free position. Offset is in PIXELS from the
+    // box's natural bottom-center spot; dragging is done by holding the card's BACKGROUND
+    // (pointerInput below the children, so button/slider taps never move it).
+    var cardOffset by remember { mutableStateOf(IntOffset.Zero) }
+    var cardSize by remember { mutableStateOf(IntSize.Zero) }
+    var visibilityExpanded by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val maxVx = with(density) { (screenWidthPx / 2f - 180.dp.toPx()).toInt().coerceAtLeast(0) }
+    val maxVy = with(density) { (screenHeightPx - 96.dp.toPx() - cardSize.height).toInt().coerceAtLeast(0) }
+    // The drag closure lives in pointerInput(Unit) (built once) — read the LATEST clamp bounds
+    // through rememberUpdatedState, otherwise cardSize.height=0 from first composition sticks.
+    val curMaxVx = rememberUpdatedState(maxVx)
+    val curMaxVy = rememberUpdatedState(maxVy)
 
-        // (B) TOP A/B/C preset chips.
+    Box(modifier = Modifier.fillMaxSize()) {
+        // (A) TOP — three CIRCULAR preset buttons, letter centered.
+        //   Tap    → load  (no-op when the slot is empty: v1.20.6, previously an empty-slot tap
+        //            silently SAVED, which is what the user hit).
+        //   Hold   → save the current layout into the slot.
         Row(
             modifier =
                 Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             for (name in listOf("A", "B", "C")) {
-                val saved = viewModel.isTouchPresetSaved(name)
+                val saved = touchControllerSettings.presets.containsKey(name)
                 val active = touchControllerSettings.activePreset == name
-                Box(
-                    modifier =
-                        Modifier
-                            .size(56.dp, 40.dp)
-                            .background(
-                                if (active) Color(0xFF35b5e8) else Color(0xE6252528),
-                                RoundedCornerShape(10.dp),
-                            )
-                            .border(
-                                1.5.dp,
-                                if (active) Color.White else Color(0xFF35b5e8),
-                                RoundedCornerShape(10.dp),
-                            )
-                            .combinedClickable(
-                                onClick = { if (saved) viewModel.loadTouchPreset(name) else viewModel.saveTouchPreset(name) },
-                                onLongClick = { viewModel.saveTouchPreset(name) },
-                            ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier =
+                            Modifier
+                                .size(52.dp)
+                                .background(
+                                    if (active) Color(0xFF35b5e8) else Color(0xE6252528),
+                                    CircleShape,
+                                )
+                                .border(
+                                    1.5.dp,
+                                    if (active) Color.White else Color(0xFF35b5e8),
+                                    CircleShape,
+                                )
+                                .combinedClickable(
+                                    onClick = { if (saved) viewModel.loadTouchPreset(name) },
+                                    onLongClick = { viewModel.saveTouchPreset(name) },
+                                ),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(
                             text = name,
                             color = if (active) Color.White else Color(0xFF35b5e8),
-                            fontSize = 16.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                         )
-                        Text(
-                            text = if (saved) "已存" else "空",
-                            color = if (active) Color.White.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.4f),
-                            fontSize = 8.sp,
-                        )
                     }
+                    Text(
+                        text = if (saved) "已存" else "空",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 9.sp,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
                 }
             }
         }
-        // Hint for the preset interaction, right under the chips.
+        // Hint for the preset interaction, right under the circles.
         Text(
             text = "点按载入 / 长按保存",
             color = Color.White.copy(alpha = 0.5f),
             fontSize = 10.sp,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 54.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 108.dp),
         )
 
-        // (C) BOTTOM bar — size slider for the selected button + action buttons.
+        // (B) FLOATING editor card — fixed 360dp width, draggable, contains size row + actions
+        //     + expandable visibility panel.
         Column(
             modifier =
                 Modifier
                     .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(Color(0xE6252528))
+                    .offset { cardOffset }
+                    .width(360.dp)
+                    .onSizeChanged { cardSize = it }
+                    .background(Color(0xE6252528), RoundedCornerShape(12.dp))
+                    .pointerInput(Unit) {
+                        // Drag the card by its background: detectDragGestures only fires once a
+                        // touch actually MOVES, and children (buttons, slider, toggles) consume
+                        // their own events, so taps/presses on controls never drag the card.
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            cardOffset =
+                                IntOffset(
+                                    (cardOffset.x + dragAmount.x).toInt().coerceIn(-curMaxVx.value, curMaxVx.value),
+                                    (cardOffset.y + dragAmount.y).toInt().coerceIn(-curMaxVy.value, 0),
+                                )
+                        }
+                    }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             val id = selectedButton.value
             if (id != null) {
                 val bs = touchControllerSettings.getButtonSettings(id)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "${id.label} · 大小",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        modifier = Modifier.width(96.dp),
-                    )
+                // v1.20.6: 复位 button LEFT, size slider RIGHT, no label text.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TextButton(
+                        onClick = { viewModel.resetButtonSettings(id) },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Text("复位", color = Color.White, fontSize = 12.sp)
+                    }
                     Slider(
                         value = bs.scale,
                         onValueChange = { viewModel.updateButtonScale(id, it) },
                         valueRange = 0.5f..2f,
                         modifier = Modifier.weight(1f),
                     )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { viewModel.resetButtonSettings(id) }) {
-                        Text("复位此按键", color = Color.White, fontSize = 12.sp)
-                    }
                 }
             } else {
                 Text(
@@ -569,17 +566,72 @@ private fun TouchControlsEditorOverlay(
                     modifier = Modifier.padding(vertical = 6.dp),
                 )
             }
-            Row(horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { viewModel.resetTouchControls() }) {
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                TextButton(
+                    onClick = { visibilityExpanded = !visibilityExpanded },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                ) {
+                    Text("显示 ▾", color = Color(0xFF35b5e8), fontSize = 12.sp)
+                }
+                TextButton(
+                    onClick = { viewModel.resetTouchControls() },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                ) {
                     Text("全部复位", color = Color.White, fontSize = 12.sp)
                 }
                 if (isNds) {
-                    TextButton(onClick = { viewModel.setEditControlsMode(false) }) {
+                    TextButton(
+                        onClick = { viewModel.setEditControlsMode(false) },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
                         Text("返回屏幕布局", color = Color(0xFF35b5e8), fontSize = 12.sp)
                     }
                 }
-                TextButton(onClick = { viewModel.exitLayoutEditor() }) {
+                TextButton(
+                    onClick = { viewModel.exitLayoutEditor() },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                ) {
                     Text(if (isNds) "退出编辑" else "完成", color = Color.White, fontSize = 12.sp)
+                }
+            }
+            // Expandable visibility panel (v1.20.6): replaces the old always-visible LEFT column.
+            if (visibilityExpanded) {
+                Column(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    for (btn in allButtons) {
+                        val visible = !touchControllerSettings.isButtonHidden(btn)
+                        val active = selectedButton.value == btn
+                        Row(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (active) Modifier.background(Color(0x2235b5e8), RoundedCornerShape(6.dp))
+                                        else Modifier,
+                                    )
+                                    .clickable { viewModel.selectEditTarget(btn) }
+                                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            MiniToggle(
+                                on = visible,
+                                onToggle = { nv -> viewModel.toggleButtonVisibility(btn, !nv) },
+                            )
+                            Text(
+                                text = btn.label,
+                                color = if (visible) Color.White else Color.White.copy(alpha = 0.45f),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                            )
+                        }
+                    }
                 }
             }
         }
