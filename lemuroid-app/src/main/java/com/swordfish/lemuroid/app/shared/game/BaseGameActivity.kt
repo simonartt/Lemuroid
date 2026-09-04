@@ -3,6 +3,7 @@ package com.swordfish.lemuroid.app.shared.game
 import android.app.Activity
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
@@ -152,7 +153,39 @@ abstract class BaseGameActivity : ImmersiveActivity() {
             },
         )
 
+        if (shouldFollowLayoutOrientation()) {
+            followLayoutOrientation(baseGameScreenViewModel)
+        }
+
         initialiseFlows()
+    }
+
+    /**
+     * v1.20.9 (bug3/bug4): on mobile, NDS's MANUAL layout mode now also locks the activity's
+     * physical orientation to that mode. Root cause: decoupling the layout from gravity left the
+     * ANCHOR still moving with the physical rotation — computeNaturalScreenRects reflowed the
+     * picture against the flipped anchor, which looked exactly like "gravity is still switching
+     * my layout", and after a rotation the reflowed frames made the per-screen enable switches
+     * appear dead. Locking the activity means rotating the phone changes nothing at all while an
+     * NDS game runs; only the menu switch moves between modes. TV keeps its old behavior.
+     */
+    protected open fun shouldFollowLayoutOrientation(): Boolean = false
+
+    private fun followLayoutOrientation(viewModel: BaseGameScreenViewModel) {
+        if (!viewModel.isNdsSystem()) return
+        lifecycleScope.launch {
+            viewModel.getScreenLayoutState().collect { state ->
+                val target =
+                    when (state.layoutOrientation) {
+                        ScreenLayoutManager.Orientation.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        ScreenLayoutManager.Orientation.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    }
+                if (requestedOrientation != target) {
+                    Timber.d("Locking game orientation to layout mode: ${state.layoutOrientation}")
+                    requestedOrientation = target
+                }
+            }
+        }
     }
 
     @Composable

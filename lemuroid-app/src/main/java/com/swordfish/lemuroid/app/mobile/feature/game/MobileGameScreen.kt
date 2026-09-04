@@ -128,11 +128,13 @@ import com.swordfish.touchinput.radial.layouts.LocalSelectedButton
  * harmless no-ops inside InputState (fold removes from empty sets).
  */
 private val ALL_TOUCH_CONTROL_IDS: Set<Id> = buildSet {
-    // Digital keys — every KeyEvent.BUTTON_* code (4..18 on Android) plus slack for any
-    // composite/derived ids PadKit may fold internally. Enumerating the whole space (instead of
-    // the exact set the active layout registers) keeps the neutralization correct for ANY
-    // pad layout, and unused ids are harmless no-ops inside InputState's fold.
-    for (code in 0..31) add(Id.Key(code))
+    // v1.20.9 ROOT-CAUSE FIX (bug1): v1.20.7/1.20.8 enumerated only Id.Key(0..31), but every pad
+    // button uses Android gamepad KEYCODES (BUTTON_MODE=82 … BUTTON_START=108) — NONE of them
+    // were in the set, so only the D-pad (a DiscreteDirection) got neutralized and every button
+    // still reacted to the editing finger. Enumerate the whole corridor any layout may use
+    // (verified against `Id.Key(KeyEvent.*)` usages in lemuroid-touchinput). Unused ids are
+    // harmless no-ops: InputState's fold just removes from an empty set.
+    for (code in 0..127) add(Id.Key(code))
     // Direction controls — every MOTION_SOURCE value under both direction wrappers.
     for (src in 0..4) {
         add(Id.DiscreteDirection(src))
@@ -497,8 +499,10 @@ private fun TouchControlsEditorOverlay(
     var cardSize by remember { mutableStateOf(IntSize.Zero) }
     var visibilityExpanded by remember { mutableStateOf(false) }
     val density = LocalDensity.current
+    // v1.20.9: card anchors at the SCREEN CENTER, so the drag clamp is symmetric on both axes
+    // (was bottom-anchored with a vertical-only-upward clamp).
     val maxVx = with(density) { (screenWidthPx / 2f - 180.dp.toPx()).toInt().coerceAtLeast(0) }
-    val maxVy = with(density) { (screenHeightPx - 96.dp.toPx() - cardSize.height).toInt().coerceAtLeast(0) }
+    val maxVy = ((screenHeightPx - cardSize.height) / 2f).toInt().coerceAtLeast(0)
     // The drag closure lives in pointerInput(Unit) (built once) — read the LATEST clamp bounds
     // through rememberUpdatedState, otherwise cardSize.height=0 from first composition sticks.
     val curMaxVx = rememberUpdatedState(maxVx)
@@ -563,12 +567,14 @@ private fun TouchControlsEditorOverlay(
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 108.dp),
         )
 
-        // (B) FLOATING editor card — fixed 360dp width, draggable, contains size row + actions
+        // (B) FLOATING editor card (v1.20.9, user request): starts at the SCREEN CENTER —
+        //     bottom-anchored cards covered the face buttons the user is trying to drag.
+        //     Fixed 360dp width, draggable in all directions, contains size row + actions
         //     + expandable visibility panel.
         Column(
             modifier =
                 Modifier
-                    .align(Alignment.BottomCenter)
+                    .align(Alignment.Center)
                     .offset { cardOffset }
                     .width(360.dp)
                     .onSizeChanged { cardSize = it }
@@ -582,7 +588,7 @@ private fun TouchControlsEditorOverlay(
                             cardOffset =
                                 IntOffset(
                                     (cardOffset.x + dragAmount.x).toInt().coerceIn(-curMaxVx.value, curMaxVx.value),
-                                    (cardOffset.y + dragAmount.y).toInt().coerceIn(-curMaxVy.value, 0),
+                                    (cardOffset.y + dragAmount.y).toInt().coerceIn(-curMaxVy.value, curMaxVy.value),
                                 )
                         }
                     }

@@ -196,7 +196,11 @@ fun PadKitScope.MelonDSLeft(
         secondaryDials = {
             TweakableButton(id = TouchButtonId.L, settings = settings) { mod -> SecondaryButtonL(modifier = mod) }
             TweakableButton(id = TouchButtonId.SELECT, settings = settings) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
-            TweakableButton(id = TouchButtonId.MENU, settings = settings) { mod -> SecondaryButtonMenuPlaceholder(settings, modifier = mod) }
+            // v1.20.9 bug2 fix: the placeholder used to be wrapped in TweakableButton(MENU), so
+            // selecting 全局菜单 drew a SECOND blue ring around this invisible slot — which sits at
+            // -120° exactly where the mic button is — and the size slider scaled both rings. The
+            // placeholder is a geometry reservation, never an editable button: call it bare.
+            SecondaryButtonMenuPlaceholder(settings)
             TweakableButton(id = TouchButtonId.L2, settings = settings) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(-120f)),

@@ -163,7 +163,10 @@ fun PadKitScope.DesmumeLeft(
         secondaryDials = {
             TweakableButtonDesmume(id = TouchButtonId.L, settings = settings) { mod -> SecondaryButtonL(modifier = mod) }
             TweakableButtonDesmume(id = TouchButtonId.SELECT, settings = settings) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
-            TweakableButtonDesmume(id = TouchButtonId.MENU, settings = settings) { mod -> SecondaryButtonMenuPlaceholder(settings, modifier = mod) }
+            // v1.20.9 bug2 fix: same as MelonDS — the invisible MENU placeholder must not be an
+            // editable button, or selecting 全局菜单 draws a phantom ring over the neighbouring
+            // slot and the slider scales both rings. The placeholder positions itself.
+            SecondaryButtonMenuPlaceholder(settings)
             TweakableButtonDesmume(id = TouchButtonId.THUMBL, settings = settings) { mod ->
                 LemuroidControlButton(
                     modifier = mod.then(Modifier.radialPosition(-120f)),

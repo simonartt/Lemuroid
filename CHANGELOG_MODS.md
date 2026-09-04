@@ -6,6 +6,28 @@
 
 ## v1.21 - 2026-09-03
 
+### v1.20.9 用户实测 4 bug+1 优化：编辑置空 keycode 全覆盖 / 隐形占位符摘除可编辑壳 / NDS 锁定物理方向到手动布局模式 / 触控编辑卡片改屏幕中心（版本升至 1.20.9-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 274 / versionName 1.20.9 / suffix -v8b**（用户 v1.20.8 真机实测反馈）:
+
+1. **bug1：编辑期只有方向键不响应按下，其他按键依然响应** — 根因（实锤）：v1.20.7/1.20.8 的 `ALL_TOUCH_CONTROL_IDS` 枚举 `Id.Key(0..31)`，但**所有布局按键用的是 Android 游戏手柄 KEYCODE**（BUTTON_MODE=82、SELECT=91、A=96…START=108），一个都不在集合里；方向键是 `Id.DiscreteDirection(0)` 恰好在 0..4 枚举内——所以只有 D-pad 真被置空，其余全漏。修：`for (code in 0..127) add(Id.Key(code))`（覆盖全部布局 keycode + 余量；未用 id 对 InputState fold 是空集移除，无害）。
+2. **bug2：选中菜单键时麦克风键也有蓝框，滑块同时缩放两个框** — 根因：左盘有个**隐形占位符** `SecondaryButtonMenuPlaceholder`（角度占位用），v1.20.5 起被 `TweakableButton(id=MENU)` 包裹 → 选中"全局菜单"时占位符也画蓝圈，而占位符 radialPosition(-120°) 正落在 MelonDS 麦克风键(L2,-120°) 位置（Desmume 则是关屏键），产生"双蓝框"；滑块写同一份 MENU 组设置 → 两个框同时缩放。修：占位符**摘掉 TweakableButton 壳、直接裸调用**（与 NES/SNES/PSX 等 15 个既有布局的用法一致），同步修 MelonDS/Desmume + GB/GBA/Nintendo3DS 三处同款隐患。占位符仍留在组内（子级数不变，径向分布不受影响）。
+3. **bug3：横竖屏切换仍被重力感应响应** + 4. **bug4：屏幕显隐开关没起作用，上屏开启但运行时上屏不显示** — 同根：v1.20.8 手动模式后代码里已无任何重力→布局路径（grep 全库无 OrientationEventListener/onOrientationChanged 活调用），但**渲染锚点仍随物理旋转走**——`LaunchedEffect(fullPos, viewPos, screenLayout, isLandscape)` 里 isLandscape=物理方向，ConstraintLayout 按物理方向重排 → viewPos（游戏视图槽位）翻转 → `computeNaturalScreenRects` 拿着"竖屏几何"算"横屏锚点"（或反之），画面重排/错位——观感即"重力还在切布局"（bug3），错位后的矩形也让显隐开关表现异常（bug4；Kotlin→JNI→native 的 enabled 链路已逐层核查无断点，Video 重建重放也在）。修（架构级，用户"手动模式"语义的完成态）：**NDS 游戏运行期间把 Activity 物理方向锁定为手动布局模式**——`BaseGameActivity.followLayoutOrientation()`：`getScreenLayoutState().collect` → PORTRAIT→SCREEN_ORIENTATION_PORTRAIT / LANDSCAPE→LANDSCAPE（仅 `shouldFollowLayoutOrientation()`=true 的移动端 GameActivity 启用，TV 不动；非 NDS 直接 return 不锁）。锚点=布局模式恒一致，旋转手机**画面与布局完全静止**，显隐开关回到可预期语义。
+5. **优化1：触控编辑悬浮卡片改屏幕中心出现** — `Alignment.BottomCenter`→`Alignment.Center`，拖动钳制改对称（maxVy=(屏高-卡高)/2，此前只许上拖 0..负值）。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `ALL_TOUCH_CONTROL_IDS` keycode 域 0..31→0..127；编辑卡片 align Center + 对称钳制。
+- `lemuroid-touchinput/.../radial/layouts/MelonDS.kt` + `Desmume.kt` + `GB.kt` + `GBA.kt` + `Nintendo3DS.kt` — 左盘 MENU 占位符摘 TweakableButton 壳改裸调用。
+- `lemuroid-app/.../shared/game/BaseGameActivity.kt` — 新增 `followLayoutOrientation()`（collect 布局状态→锁 requestedOrientation）+ open 钩子 `shouldFollowLayoutOrientation()=false`；import ActivityInfo。
+- `lemuroid-app/.../mobile/feature/game/GameActivity.kt` — override 钩子=true（仅移动端 NDS 锁向）。
+- `lemuroid-app/build.gradle.kts` — versionCode 273→274、versionName 1.20.8→1.20.9。
+
+**遗留已知问题（本次未动，如实记录）**：换屏（THUMBR）写的 core 变量值 `melonds_screen_layout1="bottom-top"`/`desmume_screens_layout="bottom/top"` 不在本仓库暴露的合法选项列表里（melonds=top-bottom/left-right，desmume=top-bottom/left-right），core 可能直接忽略→换屏可能一直无效；稳妥做法是 app 侧对调两 quad 矩形（不碰 core 变量），另立新版本验证处理。
+
+**避坑**：⚠️ PadKit 置空集合必须覆盖**实际使用的 id 空间**——本项目布局按键全是 Android KEYCODE(82..108)，不是 0..31；⚠️ `SecondaryButtonMenuPlaceholder` 是几何占位，绝不能包进可编辑按钮（隐形蓝圈+双份设置）；⚠️ 手动布局模式下，几何=layoutOrientation 的函数，锚点必须同模式——用锁向消除错配，别再往"错位后钳补救"方向走。
+
+---
+
 ### v1.20.8 用户实测 4 点修正：显隐面板 4 列网格 / NDS 按键标签纠错 / 拖动改本地实时+松手一次提交（修重影）/ 画面布局改手动方向模式（彻底脱离重力感应）（版本升至 1.20.8-v8b）
 
 **分支 `v8b-nds-editor`，versionCode 273 / versionName 1.20.8 / suffix -v8b**（用户 v1.20.7 真机实测 4 点反馈，"问题不小 你仔细思考"）:

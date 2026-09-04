@@ -37,7 +37,8 @@ fun PadKitScope.GBALeft(
         secondaryDials = {
             TweakableButton(id = TouchButtonId.L, settings = settings) { mod -> SecondaryButtonL(modifier = mod) }
             TweakableButton(id = TouchButtonId.SELECT, settings = settings) { mod -> SecondaryButtonSelect(position = 2, modifier = mod) }
-            TweakableButton(id = TouchButtonId.MENU, settings = settings) { mod -> SecondaryButtonMenuPlaceholder(settings, modifier = mod) }
+            // v1.20.9 bug2 fix: bare placeholder — never an editable button (phantom ring).
+            SecondaryButtonMenuPlaceholder(settings)
         },
     )
 }
