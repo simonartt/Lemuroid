@@ -1200,13 +1200,14 @@ private fun ScreenLayoutEditorOverlay(
                 val selEnabled = layoutState.transformOf(selectedScreen.value).enabled
                 // Pinned INSIDE the frame's top-right corner (v1.20.5) — never escapes the
                 // dashed frame or the device screen, even when the frame hugs an edge.
-                val toggleInset = 4.dp.toPx()
+                val toggleInset = with(LocalDensity.current) { 4.dp.toPx() }
+                val toggleW = with(LocalDensity.current) { 44.dp.toPx() }
                 Box(
                     modifier =
                         Modifier
                             .offset {
                                 IntOffset(
-                                    (selRect.right - fullPos.left - 44.dp.toPx() - toggleInset).toInt(),
+                                    (selRect.right - fullPos.left - toggleW - toggleInset).toInt(),
                                     (selRect.top - fullPos.top + toggleInset).toInt(),
                                 )
                             }
