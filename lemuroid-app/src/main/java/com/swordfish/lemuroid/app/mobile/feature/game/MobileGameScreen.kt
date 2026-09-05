@@ -114,7 +114,6 @@ import gg.padkit.config.HapticFeedbackType
 import gg.padkit.ids.Id
 import gg.padkit.inputstate.InputState
 import timber.log.Timber
-import com.swordfish.touchinput.radial.layouts.LocalSelectedButton
 
 /**
  * Every control id any touch layout can register (v1.20.7). While the touch-controls editor is
@@ -181,8 +180,6 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val editScreenLayoutShown = viewModel.isEditScreenLayoutShown().collectAsState(false)
         // Editor sub-mode (v1.20.5): true = touch-controls editor, false = screen-layout editor
         val editControlsMode = viewModel.isEditControlsModeShown().collectAsState(false)
-        // Selected button group in the controls editor (v1.20.7) — drives the blue ring.
-        val editingSelection = viewModel.getEditingSelection().collectAsState(initial = null)
 
         val touchGamePads = currentControllerConfig?.getTouchControllerConfig()
         val leftGamePad = touchGamePads?.leftComposable
@@ -362,7 +359,6 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                                 } else {
                                     null
                                 },
-                            LocalSelectedButton provides editingSelection.value,
                         ) {
                             leftGamePad?.invoke(
                                 this,

@@ -4,6 +4,28 @@
 
 ---
 
+## v1.21 - 2026-09-05
+
+### v1.20.10 用户实测 2 项调整：编辑手势与 graphicsLayer 解耦（根治拖动抖动/按键炸出屏幕）/ 删除编辑期蓝色选中描边（版本升至 1.20.10-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 275 / versionName 1.20.10 / suffix -v8b**（用户 v1.20.9 真机实测反馈）:
+
+1. **重中之重：拖动虚拟按键仍不停抖动，ABXY/方向键偶尔剧烈抖动后"分裂"跑出设备屏幕彻底消失（只能全部复位恢复）— 前两轮修复（v1.20.7 置空 PadKit 命中、v1.20.8 松手才提交）都没打中的真正根因 = 手势坐标自激反馈回路**：
+   - **根因**：`TweakableButton`/`TweakableButtonDesmume` 的编辑手势 `pointerInput` 与 `graphicsLayer(translationX=liveDx, scaleX=bs.scale)` 挂在**同一节点**上。Compose 的指针事件坐标会被该节点自身的 layer **逆映射**——手势每帧更新 `liveDx` 平移 layer，下一帧同一手指的**局部坐标**就反向跳变同量。形成自激振荡递推 `dx_k = ΔS_k − dx_{k−1}`（ΔS=手指真实位移）：单按钮表现为"半速+一顿一顿"跟手（不停抖动）；layer 带 scale≠1（ABXY/方向键组常被调大，横屏尤甚）时环路增益≠1，递推**发散**——`liveDx` 越滚越大、按钮高频乱跳（视觉"四分五裂"），松手提交的 accX/accY 直冲 ±4000px 夹取值写进 freeX/freeY → 按键组炸出屏幕、复位才能救回。
+   - **证据链**：v1.20.5（每帧提交版，translation 异步落地延迟 1+ 帧，同样是负系数反馈）、v1.20.8（live 同步版，系数精确 -1）两版都抖——因为两版的**坐标通路完全没变**；PadKit 侧已由 v1.20.7/1.20.9 置空（按下高亮/震动/事件全哑），排除嫌疑。
+   - **修法（架构）**：编辑手势挪到**不带 layer 的 wrapper Box** 上，`graphicsLayer` 只作用于 Box 内的 content——wrapper 的局部坐标是纯手指位移（子级 layer 变换不反馈到父级手势坐标），回路彻底断开，1:1 精确跟手。wrapper 用 `propagateMinConstraints = true`：LayoutRadial 对 primaryDial/secondaryDials 槽位是 `Constraints.fixed` 测量，透传 min 约束保证插入 wrapper 后布局零变化。**down 命中不受影响**：手指按在按钮绘制位置（freeX≠0 时=布局+平移），hit test 穿过 content 的 layer 逆映射命中子树，wrapper 作为命中链祖先照常收到 down；down 后 move/up 持续派发给原命中链（Compose 不重新 hit test），拖出原区域也不丢。
+2. **删除编辑期按键蓝色选中描边（v1.20.7 引入的选中反馈环，用户要求去掉）**：删 `TweakableButton`/`TweakableButtonDesmume` 的 `ringMod`/`isSelected` 与 `LocalSelectedButton` compositionLocal 全链（MelonDS.kt 定义 + Desmume.kt 引用 + MobileGameScreen 的 import/provides）。VM 侧 `editingSelection` 状态**保留**——编辑卡片的"显示 ▾"网格点击选中、滑杆/复位的作用对象仍靠它（网格内仍有浅色高亮行，不影响）。
+
+**修改文件**:
+- `lemuroid-touchinput/.../radial/layouts/MelonDS.kt` — `TweakableButton` 重构：非编辑路径 `content(modifier.then(baseMod))` 原样；编辑路径改 wrapper `Box(modifier.pointerInput(id){手势}, propagateMinConstraints=true){ content(baseMod) }`（手势循环体逐行不变）；删 `LocalSelectedButton` 定义 + ring 逻辑 + border/RoundedCornerShape/Color/dp imports，加 Box import。GB/GBA/Nintendo3DS 布局共用此组件，一并修复。
+- `lemuroid-touchinput/.../radial/layouts/Desmume.kt` — `TweakableButtonDesmume` 同款重构（wrapper Box + 删 ring）。
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — 删 `LocalSelectedButton` import / `editingSelection` collectAsState（仅 ring 用）/ `CompositionLocalProvider` 的 provides 项。
+- `lemuroid-app/build.gradle.kts` — versionCode 274→275、versionName 1.20.9→1.20.10。
+
+**避坑**：⚠️ **`pointerInput` 与 `graphicsLayer` 绝不能挂在同一节点再做"手势驱动本节点 translation"的事**——指针局部坐标会被自身 layer 逆映射，translation 每变一次，下一帧坐标反向跳一次，自激振荡/发散（scale≠1 时尤甚）。要"手势移动带 layer 的内容"，手势挂在外层无 layer 的 wrapper 上、layer 只包内容。⚠️ 在 LayoutRadial 的 fixed 约束槽位里插 wrapper Box 必须 `propagateMinConstraints = true`，否则 loose 测量会让 content 尺寸/对齐漂移。
+
+---
+
 ## v1.21 - 2026-09-03
 
 ### v1.20.9 用户实测 4 bug+1 优化：编辑置空 keycode 全覆盖 / 隐形占位符摘除可编辑壳 / NDS 锁定物理方向到手动布局模式 / 触控编辑卡片改屏幕中心（版本升至 1.20.9-v8b）

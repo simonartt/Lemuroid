@@ -1,8 +1,7 @@
 package com.swordfish.touchinput.radial.layouts
 
 import android.view.KeyEvent
-import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
@@ -13,11 +12,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.dp
 import com.swordfish.touchinput.controller.R
 import com.swordfish.touchinput.radial.controls.LemuroidControlButton
 import com.swordfish.touchinput.radial.controls.LemuroidControlCross
@@ -46,13 +43,6 @@ val LocalButtonEdit = compositionLocalOf<((TouchButtonId) -> Unit)?>(defaultFact
  */
 val LocalButtonDrag = compositionLocalOf<((TouchButtonId, Float, Float) -> Unit)?>(defaultFactory = { null })
 
-/**
- * Currently SELECTED button in the touch-controls editor (v1.20.7). Since the pad is fully
- * neutralized while editing (no press highlight at all), this drives the blue selection ring
- * that tells the user which button the size slider / reset act on.
- */
-val LocalSelectedButton = compositionLocalOf<TouchButtonId?>(defaultFactory = { null })
-
 /** Wrapper that applies per-button offset & scale, and intercepts clicks in edit mode */
 @Composable
 fun PadKitScope.TweakableButton(
@@ -66,9 +56,6 @@ fun PadKitScope.TweakableButton(
     val onEditDrag = LocalButtonDrag.current
     val isEditing = onEditSelect != null
     val isHidden = settings.isButtonHidden(id)
-    // Selected group gets a blue ring — the only press/selection feedback now that the pad is
-    // neutralized in edit mode (v1.20.7).
-    val isSelected = isEditing && LocalSelectedButton.current == id
 
     // Skip rendering if hidden (but still show in edit mode)
     if (isHidden && !isEditing) return
@@ -97,9 +84,8 @@ fun PadKitScope.TweakableButton(
     val lx = if (absorbed) 0f else liveDx
     val ly = if (absorbed) 0f else liveDy
 
-    // Build modifier: base + graphicsLayer for customization + pointerInput for edit mode.
-    // freeX/freeY are PIXEL translations from free dragging (v1.20.5) and stack on top of the
-    // legacy relative offset inside the same graphicsLayer.
+    // Visual layer: freeX/freeY are PIXEL translations from free dragging (v1.20.5) and stack
+    // on top of the legacy relative offset inside the same graphicsLayer.
     val needsLayer = bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f ||
         bs.freeX != 0f || bs.freeY != 0f || lx != 0f || ly != 0f
     val baseMod = if (needsLayer) {
@@ -118,66 +104,74 @@ fun PadKitScope.TweakableButton(
             if (isHidden) Modifier.graphicsLayer(alpha = 0.4f) else Modifier,
         )
     }
-    val mod = modifier.then(baseMod)
 
-    val finalMod = if (isEditing) {
-        // Press = select; drag = move this button freely (v1.20.5). Both go through the raw
-        // pointer loop below: Compose 1.6 has no awaitFirstDown, so wait for the down manually.
-        mod.pointerInput(id) {
-            awaitPointerEventScope {
-                while (true) {
-                    val ev = awaitPointerEvent()
-                    val down = ev.changes.firstOrNull { it.changedToDown() && !it.isConsumed }
-                    if (down == null) continue
-                    selectLatest.value?.invoke(id)
-                    down.consume()
-                    val downId = down.id
-                    // Each gesture commits only its OWN movement (accX). The live delta starts
-                    // from zero here; if a previous commit hasn't landed yet we lose at most one
-                    // frame of continuity — far cheaper than the double-count that carrying the
-                    // un-absorbed delta into a new commit would cause.
-                    var accX = 0f
-                    var accY = 0f
-                    var lastX = down.position.x
-                    var lastY = down.position.y
-                    val start = committedFree.value
-                    startFreeX = start.first
-                    startFreeY = start.second
-                    liveDx = 0f
-                    liveDy = 0f
-                    while (true) {
-                        val move = awaitPointerEvent()
-                        val ch = move.changes.firstOrNull { it.id == downId } ?: break
-                        if (!ch.pressed) break
-                        val dx = ch.position.x - lastX
-                        val dy = ch.position.y - lastY
-                        lastX = ch.position.x
-                        lastY = ch.position.y
-                        if (dx != 0f || dy != 0f) {
-                            accX += dx
-                            accY += dy
-                            liveDx = accX
-                            liveDy = accY
-                        }
-                        ch.consume()
-                    }
-                    // Finger lifted: commit the whole accumulated drag exactly once.
-                    if (accX != 0f || accY != 0f) {
-                        dragCommitLatest.value?.invoke(id, accX, accY)
-                    }
-                }
-            }
-        }
-    } else {
-        mod
+    if (!isEditing) {
+        content(modifier.then(baseMod))
+        return
     }
 
-    // Blue selection ring for the currently edited button group (v1.20.7).
-    val ringMod =
-        if (isSelected) Modifier.border(2.dp, Color(0xFF35B5E8), RoundedCornerShape(16.dp))
-        else Modifier
-
-    content(finalMod.then(ringMod))
+    // v1.20.10 ROOT-CAUSE FIX (buttons trembling while dragged, face/dpad groups occasionally
+    // exploding off-screen): the edit gesture used to sit on the SAME node as the graphicsLayer.
+    // Pointer coordinates are inverse-mapped through the node's own layer, so every liveDx
+    // update shifted the layer and the NEXT event's local coordinates jumped by the same amount
+    // in the opposite direction — a self-exciting loop dx_k = ΔS_k − dx_{k−1} (with a
+    // scale ≠ 1 layer the loop gain ≠ 1 and it DIVERGES; face/dpad groups are usually scaled
+    // up, which is why they shattered and ran away while single buttons "just" trembled at
+    // half speed). The gesture now lives on this wrapper Box WITHOUT the layer: its local
+    // coordinates are pure finger motion, the layer only transforms the content inside.
+    // propagateMinConstraints keeps the fixed square constraints LayoutRadial measures its dial
+    // slots with, so the extra wrapper changes nothing about layout.
+    Box(
+        modifier =
+            modifier.pointerInput(id) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val ev = awaitPointerEvent()
+                        val down = ev.changes.firstOrNull { it.changedToDown() && !it.isConsumed }
+                        if (down == null) continue
+                        selectLatest.value?.invoke(id)
+                        down.consume()
+                        val downId = down.id
+                        // Each gesture commits only its OWN movement (accX). The live delta starts
+                        // from zero here; if a previous commit hasn't landed yet we lose at most one
+                        // frame of continuity — far cheaper than the double-count that carrying the
+                        // un-absorbed delta into a new commit would cause.
+                        var accX = 0f
+                        var accY = 0f
+                        var lastX = down.position.x
+                        var lastY = down.position.y
+                        val start = committedFree.value
+                        startFreeX = start.first
+                        startFreeY = start.second
+                        liveDx = 0f
+                        liveDy = 0f
+                        while (true) {
+                            val move = awaitPointerEvent()
+                            val ch = move.changes.firstOrNull { it.id == downId } ?: break
+                            if (!ch.pressed) break
+                            val dx = ch.position.x - lastX
+                            val dy = ch.position.y - lastY
+                            lastX = ch.position.x
+                            lastY = ch.position.y
+                            if (dx != 0f || dy != 0f) {
+                                accX += dx
+                                accY += dy
+                                liveDx = accX
+                                liveDy = accY
+                            }
+                            ch.consume()
+                        }
+                        // Finger lifted: commit the whole accumulated drag exactly once.
+                        if (accX != 0f || accY != 0f) {
+                            dragCommitLatest.value?.invoke(id, accX, accY)
+                        }
+                    }
+                }
+            },
+        propagateMinConstraints = true,
+    ) {
+        content(baseMod)
+    }
 }
 
 @Composable
