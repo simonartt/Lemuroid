@@ -82,6 +82,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -98,8 +99,8 @@ import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls.Companion.MENU_LOADING_ANIMATION_MILLIS
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
-import com.swordfish.touchinput.radial.layouts.LocalButtonDrag
-import com.swordfish.touchinput.radial.layouts.LocalButtonEdit
+import com.swordfish.touchinput.radial.layouts.LocalTouchEditRegistry
+import com.swordfish.touchinput.radial.layouts.TouchEditRegistry
 import com.swordfish.lemuroid.app.shared.settings.HapticFeedbackMode
 import com.swordfish.lemuroid.lib.controller.ControllerConfig
 import com.swordfish.touchinput.controller.R
@@ -180,6 +181,14 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val editScreenLayoutShown = viewModel.isEditScreenLayoutShown().collectAsState(false)
         // Editor sub-mode (v1.20.5): true = touch-controls editor, false = screen-layout editor
         val editControlsMode = viewModel.isEditControlsModeShown().collectAsState(false)
+
+        // v1.20.11 central edit router: every TweakableButton reports its VISUAL circle into this
+        // registry while the controls editor is open; the full-screen gesture layer below
+        // hit-tests those circles (press ON the button = drag; follows free-dragged buttons) and
+        // clamps the drag inside the device screen. Replaces the per-button pointerInput, whose
+        // hit area was the radial SLOT square (empty corners + stale position after free drags).
+        val editRegistry = remember { TouchEditRegistry() }
+        val inControlsEdit = editScreenLayoutShown.value && editControlsMode.value
 
         val touchGamePads = currentControllerConfig?.getTouchControllerConfig()
         val leftGamePad = touchGamePads?.leftComposable
@@ -326,10 +335,6 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                         currentControllerConfig != null &&
                         touchControlsVisibleState.value
 
-                // Unified editor state (v1.20.5): the editor has two sub-modes —
-                // screen layout (NDS dashed frames) and touch controls (button editor).
-                val inControlsEdit = editScreenLayoutShown.value && editControlsMode.value
-
                 if (isVisible) {
                     CompositionLocalProvider(LocalLemuroidPadTheme provides LemuroidPadTheme()) {
                         if (!isLandscape && !inControlsEdit) {
@@ -348,17 +353,11 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                             )
                         }
 
-                        // In controls edit mode the pads receive select/drag callbacks instead of
-                        // game input (input is blocked VM-side while editing).
+                        // While the controls editor is open the pads report their button circles
+                        // into the edit registry (input itself is blocked VM-side; the central
+                        // gesture layer below consumes the actual touches).
                         CompositionLocalProvider(
-                            LocalButtonEdit provides
-                                if (inControlsEdit) ({ target: TouchButtonId -> viewModel.selectEditTarget(target) }) else null,
-                            LocalButtonDrag provides
-                                if (inControlsEdit) {
-                                    ({ id: TouchButtonId, dx: Float, dy: Float -> viewModel.updateButtonFreeDrag(id, dx, dy) })
-                                } else {
-                                    null
-                                },
+                            LocalTouchEditRegistry provides if (inControlsEdit) editRegistry else null,
                         ) {
                             leftGamePad?.invoke(
                                 this,
@@ -380,6 +379,20 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                         )
                     }
                 }
+            }
+
+            // v1.20.11 central edit gesture layer: full-screen, drawn ABOVE the pads (so it wins
+            // hit-testing) but BELOW the editor card overlay (a later sibling of PadKit). Its own
+            // coordinates never move or scale → measured deltas are pure finger motion, no
+            // feedback loop (the v1.20.10 root cause). Press inside a button's VISUAL circle
+            // (wherever it currently sits) selects and drags it; the drag keeps the circle fully
+            // inside the device screen; finger-up commits the clamped delta once.
+            if (inControlsEdit) {
+                TouchControlsEditGestureLayer(
+                    registry = editRegistry,
+                    onSelect = { viewModel.selectEditTarget(it) },
+                    onCommit = { id, dx, dy -> viewModel.updateButtonFreeDrag(id, dx, dy) },
+                )
             }
         }
 
@@ -462,9 +475,98 @@ private fun GameScreenRunningCentralMenu(
 }
 
 /**
+ * Central edit-mode gesture router (v1.20.11). Full-screen layer above the pads: a press inside
+ * a button's VISUAL circle (see TouchEditRegistry — circles follow free-dragged buttons) selects
+ * and drags that button; presses elsewhere do nothing. The layer itself never moves or scales,
+ * so pointer deltas are pure finger motion (no graphicsLayer feedback loop, v1.20.10 lesson).
+ * During the drag the circle center is clamped so the button stays fully inside the screen; on
+ * finger-up the CLAMPED delta is committed once through the VM (additive freeX/freeY).
+ */
+@Composable
+private fun TouchControlsEditGestureLayer(
+    registry: TouchEditRegistry,
+    onSelect: (TouchButtonId) -> Unit,
+    onCommit: (TouchButtonId, Float, Float) -> Unit,
+) {
+    val selectLatest = rememberUpdatedState(onSelect)
+    val commitLatest = rememberUpdatedState(onCommit)
+    // Registry circles are in ROOT px; convert this layer's local coordinates with its origin.
+    var layerOrigin by remember { mutableStateOf(Offset.Zero) }
+    var layerSize by remember { mutableStateOf(IntSize.Zero) }
+
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .onGloballyPositioned {
+                    layerOrigin = it.positionInRoot()
+                    layerSize = it.size
+                }
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val down = ev.changes.firstOrNull { it.changedToDown() && !it.isConsumed } ?: continue
+                            // Hit test against the buttons' visual circles (root px).
+                            val target = registry.findTarget(down.position.x + layerOrigin.x, down.position.y + layerOrigin.y) ?: continue
+                            selectLatest.value.invoke(target.id)
+                            down.consume()
+                            target.dragging = true
+                            // Gesture start: freeze the committed values the handover compares
+                            // against (absorbed in TweakableButton) and reset the live delta.
+                            target.dragStartFreeX = target.freeX
+                            target.dragStartFreeY = target.freeY
+                            target.live.value = Offset.Zero
+                            val downId = down.id
+                            var accX = 0f
+                            var accY = 0f
+                            var lastX = down.position.x
+                            var lastY = down.position.y
+                            // Clamped visual circle center (root px) — what is actually shown.
+                            var clampedCx = target.centerX
+                            var clampedCy = target.centerY
+                            while (true) {
+                                val move = awaitPointerEvent()
+                                val ch = move.changes.firstOrNull { it.id == downId } ?: break
+                                if (!ch.pressed) break
+                                accX += ch.position.x - lastX
+                                accY += ch.position.y - lastY
+                                lastX = ch.position.x
+                                lastY = ch.position.y
+                                // Keep the circle fully inside the device screen (degenerate
+                                // guard: a circle larger than the screen centers it).
+                                val r = target.radius
+                                val loX = minOf(r, layerSize.width - r)
+                                val hiX = maxOf(r, layerSize.width - r)
+                                val loY = minOf(r, layerSize.height - r)
+                                val hiY = maxOf(r, layerSize.height - r)
+                                clampedCx = (target.centerX + accX).coerceIn(loX, hiX)
+                                clampedCy = (target.centerY + accY).coerceIn(loY, hiY)
+                                target.live.value = Offset(clampedCx - target.centerX, clampedCy - target.centerY)
+                                ch.consume()
+                            }
+                            target.dragging = false
+                            // Commit exactly what is on screen: back-compute the free delta from
+                            // the clamped circle center (VM's updateButtonFreeDrag is additive).
+                            if (clampedCx != target.centerX || clampedCy != target.centerY) {
+                                val newFreeX = clampedCx - target.slotCx - target.legacyX
+                                val newFreeY = clampedCy - target.slotCy - target.legacyY
+                                val dx = newFreeX - target.dragStartFreeX
+                                val dy = newFreeY - target.dragStartFreeY
+                                if (dx != 0f || dy != 0f) {
+                                    commitLatest.value.invoke(target.id, dx, dy)
+                                }
+                            }
+                        }
+                    }
+                },
+    )
+}
+
+/**
  * Touch-button editor overlay (v1.20.5, reworked in v1.20.6 per user feedback). The buttons
- * themselves are dragged directly on the game picture (via LocalButtonDrag); this overlay only
- * supplies the surrounding controls:
+ * themselves are dragged directly on the game picture (via the central gesture layer); this
+ * overlay only supplies the surrounding controls:
  *   • TOP: three CIRCULAR A / B / C preset buttons, letter centered. Tap = LOAD the preset (no-op
  *     while empty), long-press = SAVE current layout into it. Active preset highlighted, "已存"
  *     under the letter when saved. (v1.20.6 fix: tap no longer auto-saves empty slots.)

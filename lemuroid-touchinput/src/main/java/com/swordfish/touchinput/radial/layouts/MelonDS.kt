@@ -1,20 +1,19 @@
 package com.swordfish.touchinput.radial.layouts
 
 import android.view.KeyEvent
-import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.changedToDown
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import com.swordfish.touchinput.controller.R
 import com.swordfish.touchinput.radial.controls.LemuroidControlButton
 import com.swordfish.touchinput.radial.controls.LemuroidControlCross
@@ -34,16 +33,63 @@ import gg.padkit.ids.Id
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
 
-/** CompositionLocal to pass edit-mode callback into the PadKit tree */
-val LocalButtonEdit = compositionLocalOf<((TouchButtonId) -> Unit)?>(defaultFactory = { null })
+/**
+ * Edit-mode hit target for ONE button group (v1.20.11). TweakableButton reports the group's
+ * VISUAL circle here (root px, committed position); the central gesture router in
+ * MobileGameScreen hit-tests against these circles and drives [live] during a drag.
+ *
+ * Why a central router: per-button pointerInput cannot give correct hit areas — the hit area of
+ * a layout node is its bounds (the radial SLOT square), which (a) includes the empty corners
+ * around the circular visual, and (b) stays at the slot even after the button was free-dragged
+ * elsewhere. It also had to live on a moving/scaled node or a wrapper, and a wrapper swallowed
+ * the secondary dials' radialPosition ParentDataModifier (v1.20.10 regression: dials collapsed
+ * to the default angle while editing). With the router, the button nodes stay plain children of
+ * the radial layout and only REPORT their geometry.
+ */
+class TouchEditTarget(val id: TouchButtonId) {
+    /** Live drag delta (px) written by the router; rendered by TweakableButton until the commit lands. */
+    val live = mutableStateOf(Offset.Zero)
+
+    // Committed VISUAL circle (root px) — slot center + legacy offset + freeX/freeY. No live.
+    var centerX = 0f
+    var centerY = 0f
+    var radius = 0f
+
+    // Geometry needed by the router to convert a clamped visual position back into freeX/freeY.
+    var slotCx = 0f
+    var slotCy = 0f
+    var legacyX = 0f
+    var legacyY = 0f
+    var freeX = 0f
+    var freeY = 0f
+
+    var dragging = false
+    var dragStartFreeX = 0f
+    var dragStartFreeY = 0f
+}
 
 /**
- * CompositionLocal carrying the edit-mode drag callback (dx/dy in PIXELS): moving the selected
- * button writes into its ButtonGroupSettings.freeX/freeY (v1.20.5). Null outside edit mode.
+ * Registry of all [TouchEditTarget]s currently on screen (v1.20.11). Provided via
+ * [LocalTouchEditRegistry] only while the touch-controls editor is open.
  */
-val LocalButtonDrag = compositionLocalOf<((TouchButtonId, Float, Float) -> Unit)?>(defaultFactory = { null })
+class TouchEditRegistry {
+    val targets = mutableListOf<TouchEditTarget>()
 
-/** Wrapper that applies per-button offset & scale, and intercepts clicks in edit mode */
+    /** Circle hit test; the smallest containing circle wins (small buttons sit on top). */
+    fun findTarget(x: Float, y: Float): TouchEditTarget? =
+        targets
+            .filter { t ->
+                val dx = x - t.centerX
+                val dy = y - t.centerY
+                dx * dx + dy * dy <= t.radius * t.radius
+            }
+            .minByOrNull { it.radius }
+}
+
+/** Provided (non-null) only while the touch-controls editor is open (v1.20.11). */
+val LocalTouchEditRegistry = compositionLocalOf<TouchEditRegistry?>(defaultFactory = { null })
+
+/** Wrapper that applies per-button offset & scale, and reports geometry to the edit router */
 @Composable
 fun PadKitScope.TweakableButton(
     id: TouchButtonId,
@@ -52,37 +98,35 @@ fun PadKitScope.TweakableButton(
     content: @Composable (Modifier) -> Unit,
 ) {
     val bs = settings.getButtonSettings(id)
-    val onEditSelect = LocalButtonEdit.current
-    val onEditDrag = LocalButtonDrag.current
-    val isEditing = onEditSelect != null
+    val registry = LocalTouchEditRegistry.current
+    val isEditing = registry != null
     val isHidden = settings.isButtonHidden(id)
 
     // Skip rendering if hidden (but still show in edit mode)
     if (isHidden && !isEditing) return
 
-    // pointerInput captures its block ONCE per key — hold the latest callbacks in updated
-    // states so the drag loop never invokes a stale closure.
-    val selectLatest = rememberUpdatedState(onEditSelect)
-    val dragCommitLatest = rememberUpdatedState(onEditDrag)
-    // Latest COMMITTED freeX/freeY — read inside the once-built pointerInput closure through
-    // this updated state (capturing `bs` there would be stale).
-    val committedFree = rememberUpdatedState(bs.freeX to bs.freeY)
+    val target = remember(id) { TouchEditTarget(id) }
+    if (registry != null) {
+        DisposableEffect(registry, id) {
+            registry.targets.add(target)
+            onDispose { registry.targets.remove(target) }
+        }
+    }
 
-    // LIVE drag delta (v1.20.8): while the finger moves, the button follows via this local pixel
-    // offset — nothing touches the Settings store mid-drag. Committing every event through the
-    // VM meant a full Settings+presets JSON encode + SharedPreferences write + pad-tree rebuild
-    // at ~120Hz; the backlog flushed in bursts = the ghosting / "shattering" the user saw (worse
-    // in landscape, where buttons are bigger). On finger-up the accumulated delta is committed
-    // ONCE; the live delta keeps rendering until the commit lands in bs.freeX/freeY (the
-    // `absorbed` check), which then hands the position over seamlessly — no snap-back frame,
-    // no double-move frame.
-    var liveDx by remember { mutableFloatStateOf(0f) }
-    var liveDy by remember { mutableFloatStateOf(0f) }
-    var startFreeX by remember { mutableFloatStateOf(0f) }
-    var startFreeY by remember { mutableFloatStateOf(0f) }
-    val absorbed = bs.freeX != startFreeX || bs.freeY != startFreeY
-    val lx = if (absorbed) 0f else liveDx
-    val ly = if (absorbed) 0f else liveDy
+    // Slot rect = the button node's LAYOUT position (own graphicsLayer translation is NOT
+    // included in these coordinates — same semantics PadKit's controls rely on), so it stays the
+    // untranslated anchor even while the visual floats elsewhere via freeX/freeY/live.
+    val slotRect = remember { mutableStateOf<Rect?>(null) }
+
+    // LIVE drag delta (v1.20.8): the button follows the finger via a local pixel offset; the
+    // Settings store is written ONCE on finger-up (per-event VM writes = full JSON encode + SP
+    // write + pad rebuild at ~120Hz → the ghosting the user saw). Absorbed = the commit has
+    // landed in bs.freeX/freeY → the live delta hands the position over seamlessly (no
+    // snap-back frame, no double-move frame). v1.20.11: the delta lives on the registry target;
+    // the central router writes it (see TouchEditTarget).
+    val absorbed = bs.freeX != target.dragStartFreeX || bs.freeY != target.dragStartFreeY
+    val lx = if (absorbed) 0f else target.live.value.x
+    val ly = if (absorbed) 0f else target.live.value.y
 
     // Visual layer: freeX/freeY are PIXEL translations from free dragging (v1.20.5) and stack
     // on top of the legacy relative offset inside the same graphicsLayer.
@@ -105,73 +149,38 @@ fun PadKitScope.TweakableButton(
         )
     }
 
-    if (!isEditing) {
-        content(modifier.then(baseMod))
-        return
+    val trackMod =
+        if (isEditing) {
+            Modifier.onGloballyPositioned { slotRect.value = it.boundsInRoot() }
+        } else {
+            Modifier
+        }
+
+    // Report the committed visual circle to the router after every recomposition. NOTE: no
+    // wrapper node here — TweakableButton emits the content node directly so the secondary
+    // dials' radialPosition ParentDataModifier keeps reaching LayoutRadial (a wrapper broke it
+    // in v1.20.10: every secondary dial collapsed to the default angle while editing).
+    SideEffect {
+        val rect = slotRect.value
+        if (rect != null) {
+            val half = minOf(rect.width, rect.height) / 2f
+            val legacyX = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX
+            val legacyY = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY
+            val slotCx = rect.left + rect.width / 2f
+            val slotCy = rect.top + rect.height / 2f
+            target.centerX = slotCx + legacyX + bs.freeX
+            target.centerY = slotCy + legacyY + bs.freeY
+            target.radius = half * bs.scale
+            target.slotCx = slotCx
+            target.slotCy = slotCy
+            target.legacyX = legacyX
+            target.legacyY = legacyY
+            target.freeX = bs.freeX
+            target.freeY = bs.freeY
+        }
     }
 
-    // v1.20.10 ROOT-CAUSE FIX (buttons trembling while dragged, face/dpad groups occasionally
-    // exploding off-screen): the edit gesture used to sit on the SAME node as the graphicsLayer.
-    // Pointer coordinates are inverse-mapped through the node's own layer, so every liveDx
-    // update shifted the layer and the NEXT event's local coordinates jumped by the same amount
-    // in the opposite direction — a self-exciting loop dx_k = ΔS_k − dx_{k−1} (with a
-    // scale ≠ 1 layer the loop gain ≠ 1 and it DIVERGES; face/dpad groups are usually scaled
-    // up, which is why they shattered and ran away while single buttons "just" trembled at
-    // half speed). The gesture now lives on this wrapper Box WITHOUT the layer: its local
-    // coordinates are pure finger motion, the layer only transforms the content inside.
-    // propagateMinConstraints keeps the fixed square constraints LayoutRadial measures its dial
-    // slots with, so the extra wrapper changes nothing about layout.
-    Box(
-        modifier =
-            modifier.pointerInput(id) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val ev = awaitPointerEvent()
-                        val down = ev.changes.firstOrNull { it.changedToDown() && !it.isConsumed }
-                        if (down == null) continue
-                        selectLatest.value?.invoke(id)
-                        down.consume()
-                        val downId = down.id
-                        // Each gesture commits only its OWN movement (accX). The live delta starts
-                        // from zero here; if a previous commit hasn't landed yet we lose at most one
-                        // frame of continuity — far cheaper than the double-count that carrying the
-                        // un-absorbed delta into a new commit would cause.
-                        var accX = 0f
-                        var accY = 0f
-                        var lastX = down.position.x
-                        var lastY = down.position.y
-                        val start = committedFree.value
-                        startFreeX = start.first
-                        startFreeY = start.second
-                        liveDx = 0f
-                        liveDy = 0f
-                        while (true) {
-                            val move = awaitPointerEvent()
-                            val ch = move.changes.firstOrNull { it.id == downId } ?: break
-                            if (!ch.pressed) break
-                            val dx = ch.position.x - lastX
-                            val dy = ch.position.y - lastY
-                            lastX = ch.position.x
-                            lastY = ch.position.y
-                            if (dx != 0f || dy != 0f) {
-                                accX += dx
-                                accY += dy
-                                liveDx = accX
-                                liveDy = accY
-                            }
-                            ch.consume()
-                        }
-                        // Finger lifted: commit the whole accumulated drag exactly once.
-                        if (accX != 0f || accY != 0f) {
-                            dragCommitLatest.value?.invoke(id, accX, accY)
-                        }
-                    }
-                }
-            },
-        propagateMinConstraints = true,
-    ) {
-        content(baseMod)
-    }
+    content(modifier.then(trackMod).then(baseMod))
 }
 
 @Composable

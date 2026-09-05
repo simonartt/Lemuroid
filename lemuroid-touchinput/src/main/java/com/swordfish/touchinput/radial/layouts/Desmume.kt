@@ -1,18 +1,9 @@
 package com.swordfish.touchinput.radial.layouts
 
 import android.view.KeyEvent
-import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.changedToDown
-import androidx.compose.ui.input.pointer.pointerInput
 import com.swordfish.touchinput.controller.R
 import com.swordfish.touchinput.radial.controls.LemuroidControlButton
 import com.swordfish.touchinput.radial.controls.LemuroidControlCross
@@ -26,14 +17,17 @@ import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonSelect
 import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonStart
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
-import com.swordfish.touchinput.radial.layouts.LocalButtonEdit
 import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
 import gg.padkit.PadKitScope
 import gg.padkit.ids.Id
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
 
-/** Wrapper that applies per-button offset & scale, and intercepts clicks in edit mode */
+/**
+ * Delegates to [TweakableButton] (v1.20.11): the two wrappers had become identical — the edit
+ * gesture now lives in the central router (see TouchEditRegistry), so one implementation serves
+ * both cores. GB/GBA/Nintendo3DS already used TweakableButton directly.
+ */
 @Composable
 fun PadKitScope.TweakableButtonDesmume(
     id: TouchButtonId,
@@ -41,109 +35,7 @@ fun PadKitScope.TweakableButtonDesmume(
     modifier: Modifier = Modifier,
     content: @Composable (Modifier) -> Unit,
 ) {
-    val bs = settings.getButtonSettings(id)
-    val onEditSelect = LocalButtonEdit.current
-    val onEditDrag = LocalButtonDrag.current
-    val isEditing = onEditSelect != null
-    val isHidden = settings.isButtonHidden(id)
-
-    if (isHidden && !isEditing) return
-
-    // pointerInput captures its block once — read the latest callbacks through updated states.
-    val selectLatest = rememberUpdatedState(onEditSelect)
-    val dragCommitLatest = rememberUpdatedState(onEditDrag)
-    // Latest COMMITTED freeX/freeY for the once-built pointerInput closure.
-    val committedFree = rememberUpdatedState(bs.freeX to bs.freeY)
-
-    // LIVE drag delta (v1.20.8): the button follows the finger via a local pixel offset; the
-    // Settings store is written ONCE on finger-up. Per-event VM writes meant a full JSON encode
-    // + SharedPreferences write + pad rebuild at ~120Hz — the backlog caused the ghosting /
-    // shattering (worse in landscape). The live delta stays visible until the commit lands in
-    // bs.freeX/freeY (absorbed check): no snap-back, no double-move frame.
-    var liveDx by remember { mutableFloatStateOf(0f) }
-    var liveDy by remember { mutableFloatStateOf(0f) }
-    var startFreeX by remember { mutableFloatStateOf(0f) }
-    var startFreeY by remember { mutableFloatStateOf(0f) }
-    val absorbed = bs.freeX != startFreeX || bs.freeY != startFreeY
-    val lx = if (absorbed) 0f else liveDx
-    val ly = if (absorbed) 0f else liveDy
-
-    val needsLayer = bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f ||
-        bs.freeX != 0f || bs.freeY != 0f || lx != 0f || ly != 0f
-    val baseMod = if (needsLayer) {
-        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX + lx
-        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY + ly
-        Modifier.graphicsLayer(
-            translationX = ox,
-            translationY = oy,
-            scaleX = bs.scale,
-            scaleY = bs.scale,
-            alpha = if (isHidden) 0.4f else 1f,
-        )
-    } else {
-        Modifier.then(
-            if (isHidden) Modifier.graphicsLayer(alpha = 0.4f) else Modifier,
-        )
-    }
-
-    if (!isEditing) {
-        content(modifier.then(baseMod))
-        return
-    }
-
-    // v1.20.10 ROOT-CAUSE FIX (same as MelonDS TweakableButton): the edit gesture used to sit on
-    // the SAME node as the graphicsLayer, so every liveDx update shifted the layer and the next
-    // pointer event's LOCAL coordinates were inverse-mapped through it — a self-exciting loop
-    // dx_k = ΔS_k − dx_{k−1} (with scale ≠ 1 it DIVERGES): buttons trembled while dragged and
-    // face/dpad groups occasionally exploded off-screen. The gesture now lives on this wrapper
-    // Box WITHOUT the layer — its local coordinates are pure finger motion.
-    Box(
-        modifier =
-            modifier.pointerInput(id) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val ev = awaitPointerEvent()
-                        val down = ev.changes.firstOrNull { it.changedToDown() && !it.isConsumed }
-                        if (down == null) continue
-                        selectLatest.value?.invoke(id)
-                        down.consume()
-                        val downId = down.id
-                        var accX = 0f
-                        var accY = 0f
-                        var lastX = down.position.x
-                        var lastY = down.position.y
-                        val start = committedFree.value
-                        startFreeX = start.first
-                        startFreeY = start.second
-                        liveDx = 0f
-                        liveDy = 0f
-                        while (true) {
-                            val move = awaitPointerEvent()
-                            val ch = move.changes.firstOrNull { it.id == downId } ?: break
-                            if (!ch.pressed) break
-                            val dx = ch.position.x - lastX
-                            val dy = ch.position.y - lastY
-                            lastX = ch.position.x
-                            lastY = ch.position.y
-                            if (dx != 0f || dy != 0f) {
-                                accX += dx
-                                accY += dy
-                                liveDx = accX
-                                liveDy = accY
-                            }
-                            ch.consume()
-                        }
-                        // Finger lifted: commit the whole accumulated drag exactly once.
-                        if (accX != 0f || accY != 0f) {
-                            dragCommitLatest.value?.invoke(id, accX, accY)
-                        }
-                    }
-                }
-            },
-        propagateMinConstraints = true,
-    ) {
-        content(baseMod)
-    }
+    TweakableButton(id = id, settings = settings, modifier = modifier, content = content)
 }
 
 @Composable

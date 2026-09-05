@@ -6,6 +6,30 @@
 
 ## v1.21 - 2026-09-05
 
+### v1.20.11 编辑手势改中央路由层：拖动必须按在按键本体（视觉圆命中、跟随已移动位置）/ 按键不可拖出设备屏幕 / 修复 v1.20.10 编辑期副拨盘塌角度回归（版本升至 1.20.11-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 276 / versionName 1.20.11 / suffix -v8b**（用户 v1.20.10 实测反馈：拖动已不抖，但"触摸在选中按键之外依然会被拖动，导致调下一个按键有时无法响应"+"所有按钮都无法被拖出设备屏幕之外"）:
+
+1. **拖动命中改为按键本体（架构重构：per-button 手势 → 中央路由层）** — 根因（三层）：
+   - **命中区域=布局节点的 bounds**：v1.20.10 的编辑手势挂在按键 wrapper Box 上，其命中区域是径向布局的**槽位正方形**——含圆形本体外的四个空角（"按在按键之外也拖动"的直接来源）；
+   - **命中区域不跟随已移动的按键**：槽位方块永远停在原始径向位置，按键被 freeX/freeY 拖走后，原槽位成了"幽灵热区"（误抓），新位置反而摸不到（调下一个按键"无法响应"）；
+   - **v1.20.10 回归实锤**：wrapper Box 隔断了副拨盘 `radialPosition`（**ParentDataModifier**，LayoutRadial 靠它定位每个副拨盘）向 LayoutRadial 的传递 → **编辑模式下所有副拨盘塌到默认角度 0°、方块大面积互叠**，加重了误抓/无响应。
+   - **修法（中央路由）**：删掉全部 per-button `pointerInput`。每个 `TweakableButton` 只**上报几何**（`TouchEditTarget`：视觉圆心=槽位中心+legacy offset+freeX/freeY，半径=内切半边×scale，root px；经 `SideEffect` 每次重组后刷新）；`MobileGameScreen` 在 PadKit 内容末尾、编辑模式时挂一个**全屏手势路由层 `TouchControlsEditGestureLayer`**（画在 pads 之上、编辑卡片 overlay 之下）：按下时对注册表做**圆形命中测试**（最小的包含圆获胜=小按键优先，符合"小键叠在大键上"的视觉层级），命中才 select+拖动，未命中不消费不动。路由层自身**从不移动/缩放** → 手指位移=纯坐标差，v1.20.10 的自激反馈回路从结构上不可能复发。**TweakableButton 不再包 wrapper**（radialPosition parentData 恢复直达 LayoutRadial，副拨盘编辑期角度回归修复）。live 渲染/absorbed 无缝交接语义保留（live 状态移到 TouchEditTarget 上由路由层驱动）。
+2. **按键不可拖出设备屏幕** — 路由层拖动中每帧把**视觉圆心**钳制在 `[r, layerW−r]×[r, layerH−r]`（r=视觉半径；圆大于屏的退化情形居中保护）；松手提交的是**钳制后**的增量（由钳制圆心反解 freeX/newFree，与 VM `updateButtonFreeDrag` 的增量语义对接）——所见即所存，无提交后回跳。旧版本已存出界的按键在下次拖动时自动钳回屏内（自愈）。
+3. **附带收益**：路由层全屏置顶，编辑期空屏触摸不再漏给 GLRetroView（NDS 触摸注入）；`TweakableButtonDesmume` 与 `TweakableButton` 已完全同构，改为直接委托（单一实现，GB/GBA/Nintendo3DS 本就共用）。
+
+**修改文件**:
+- `lemuroid-touchinput/.../radial/layouts/MelonDS.kt` — 新增 `TouchEditTarget`（视觉圆几何+live 状态+dragging/dragStartFree）与 `TouchEditRegistry`（圆形命中，最小圆优先）、`LocalTouchEditRegistry`；`TweakableButton` 重构：删 wrapper+pointerInput 手势循环，改 `onGloballyPositioned` 上报槽位 rect（boundsInRoot 不含自身 layer 平移，为纯布局锚点）+ `SideEffect` 刷新 target + `DisposableEffect` 注册/注销；删 `LocalButtonEdit`/`LocalButtonDrag` 定义；imports 大改（增 DisposableEffect/SideEffect/State/mutableStateOf/Offset/Rect/boundsInRoot/onGloballyPositioned，删 Box/CompositionLocalProvider/getValue/setValue/mutableFloatStateOf/rememberUpdatedState/changedToDown/pointerInput）。
+- `lemuroid-touchinput/.../radial/layouts/Desmume.kt` — `TweakableButtonDesmume` 改为委托 `TweakableButton`（删整个同构实现与手势 imports）。
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — 新增 `TouchControlsEditGestureLayer`（全屏路由：圆形命中→select+consume→增量循环→屏内钳制→松手一次提交钳制增量）并在 PadKit 内容末尾 `if (inControlsEdit)` 挂载；`editRegistry` remember + `inControlsEdit` 提升到 PadKit 之前；`CompositionLocalProvider` 换 `LocalTouchEditRegistry provides`；删 LocalButtonEdit/LocalButtonDrag import；增 positionInRoot import。
+- `lemuroid-app/build.gradle.kts` — versionCode 275→276、versionName 1.20.10→1.20.11。
+
+**避坑**：⚠️ **ParentDataModifier（radialPosition/radialScale）只对"直接子 measurable"生效**——在可编辑组件外面包任何 wrapper 节点都会把它吃掉（v1.20.10 教训：编辑期副拨盘全塌 0°）。要包装必须把 parentData 修饰符留在最外层，或干脆不包。⚠️ 手势命中想要"视觉本体"（圆/异形）就必须中央命中测试——布局节点的命中区域永远是矩形 bounds，既含空角也不跟随 graphicsLayer 平移。⚠️ 路由层松手提交必须提交**钳制后**的值，否则 live→commit 交接帧会回跳。
+
+---
+
+## v1.21 - 2026-09-05
+
 ### v1.20.10 用户实测 2 项调整：编辑手势与 graphicsLayer 解耦（根治拖动抖动/按键炸出屏幕）/ 删除编辑期蓝色选中描边（版本升至 1.20.10-v8b）
 
 **分支 `v8b-nds-editor`，versionCode 275 / versionName 1.20.10 / suffix -v8b**（用户 v1.20.9 真机实测反馈）:
