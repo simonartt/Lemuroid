@@ -4,6 +4,23 @@
 
 ---
 
+## v1.24 - 2026-09-14
+
+### v1.20.14 修复"进入编辑模式后必须先点全部复位才能编辑任何按钮"：命中圆注册的 slotRect 读取提升到组合期（版本升至 1.20.14-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 279 / versionName 1.20.14 / suffix -v8b**（用户真机反馈：进入编辑界面一开始无法编辑任何按钮，必须点"全部复位"之后才能编辑）:
+
+1. **根因（Compose state 订阅缺失）** — `TweakableButton` 通过 `SideEffect` 把自己的命中圆（center/radius）注册进 `TouchEditRegistry`，但 `slotRect.value` 只在 **SideEffect lambda 内部**读取。进入编辑模式的首次组合时 slotRect 还是 null（注册空转）；布局完成后 `onGloballyPositioned` 回填 slotRect —— 可这个 state **没有任何组合期读者**，写入不会调度重组，SideEffect 永远不会重跑，所有命中圆停在 (0,0,半径0)，`findTarget` 永远 miss → 一个按钮都选不中/拖不动。而"全部复位"写 settings → 全体按钮重组 → SideEffect 恰好带着已有值的 slotRect 重跑 → 圆注册成功 → 这才能编辑。与用户现象完全吻合（也解释了 1.20.10/11 时期"有时选不中下一个按钮"的偶发性）。
+2. **修法** — 把 `val rect = slotRect.value` 提升到组合期读取（SideEffect 捕获该值）：布局回调写入 → 订阅该 state 的组合域调度重组 → SideEffect 重跑 → 进入编辑模式即完成命中圆注册，无需任何前置操作。一行读取位置变更，无其他语义改动。
+
+**修改文件**:
+- `lemuroid-touchinput/.../radial/layouts/MelonDS.kt` — `TweakableButton`：`slotRect.value` 的读取从 SideEffect lambda 内移到组合期（`val rect = slotRect.value` + SideEffect 捕获）。
+- `lemuroid-app/build.gradle.kts` — versionCode 278→279、versionName 1.20.13→1.20.14。
+
+**沿用**：1.20.13 绘制块跟手渲染；1.20.12 选中透明度凸显（0.9/0.5/0.4）。
+
+---
+
 ## v1.23 - 2026-09-14
 
 ### v1.20.13 修复中央路由化后"拖动不跟手、松手才跳位置"：编辑期渲染改 graphicsLayer 绘制块（逐帧订阅 live 增量）（版本升至 1.20.13-v8b）

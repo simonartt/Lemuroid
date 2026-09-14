@@ -199,8 +199,16 @@ fun PadKitScope.TweakableButton(
     // wrapper node here — TweakableButton emits the content node directly so the secondary
     // dials' radialPosition ParentDataModifier keeps reaching LayoutRadial (a wrapper broke it
     // in v1.20.10: every secondary dial collapsed to the default angle while editing).
+    //
+    // v1.20.14 BUG FIX ("must press 全部复位 before any button can be edited"): rect MUST be read
+    // here in the composition scope, not only inside the SideEffect lambda. Entering edit mode
+    // composes once with slotRect still null; onGloballyPositioned then fills it, but a write to a
+    // state nobody reads during composition schedules NO recomposition — so the SideEffect never
+    // re-ran and every hit circle stayed (0,0,r=0) until some settings write (e.g. 全部复位)
+    // happened to recompose the buttons. Reading it here subscribes the scope → the layout
+    // callback triggers recomposition → the circles register immediately.
+    val rect = slotRect.value
     SideEffect {
-        val rect = slotRect.value
         if (rect != null) {
             val half = minOf(rect.width, rect.height) / 2f
             val legacyX = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX
