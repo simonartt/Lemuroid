@@ -89,6 +89,15 @@ class TouchEditRegistry {
 /** Provided (non-null) only while the touch-controls editor is open (v1.20.11). */
 val LocalTouchEditRegistry = compositionLocalOf<TouchEditRegistry?>(defaultFactory = { null })
 
+/**
+ * Currently SELECTED button group while the touch-controls editor is open (v1.20.12). Since the
+ * blue selection ring was removed (v1.20.10) and the pad is fully neutralized while editing, the
+ * selected button gets NO press highlight — this drives the alpha highlight instead: the selected
+ * button stays bright (90%) while every unselected button dims to 50%, so it's obvious which button
+ * the size slider / reset is acting on.
+ */
+val LocalEditingSelection = compositionLocalOf<TouchButtonId?>(defaultFactory = { null })
+
 /** Wrapper that applies per-button offset & scale, and reports geometry to the edit router */
 @Composable
 fun PadKitScope.TweakableButton(
@@ -101,6 +110,8 @@ fun PadKitScope.TweakableButton(
     val registry = LocalTouchEditRegistry.current
     val isEditing = registry != null
     val isHidden = settings.isButtonHidden(id)
+    // v1.20.12: alpha highlight for the selected button group (replaces the removed blue ring).
+    val isSelected = isEditing && LocalEditingSelection.current == id
 
     // Skip rendering if hidden (but still show in edit mode)
     if (isHidden && !isEditing) return
@@ -130,24 +141,34 @@ fun PadKitScope.TweakableButton(
 
     // Visual layer: freeX/freeY are PIXEL translations from free dragging (v1.20.5) and stack
     // on top of the legacy relative offset inside the same graphicsLayer.
-    val needsLayer = bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f ||
+    // Alpha (v1.20.12): in edit mode the SELECTED button stays bright (0.9) while every other
+    // button dims to 0.5 so the active edit target is obvious; hidden buttons stay extra dim so
+    // they can still be told apart from normal dimmed ones. Outside edit mode: 1.0 (0.4 when hidden).
+    val alpha =
+        when {
+            !isEditing -> if (isHidden) 0.4f else 1f
+            isSelected -> 0.9f
+            isHidden -> 0.4f
+            else -> 0.5f
+        }
+    val hasLayer = bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f ||
         bs.freeX != 0f || bs.freeY != 0f || lx != 0f || ly != 0f
-    val baseMod = if (needsLayer) {
-        val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX + lx
-        val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY + ly
-        Modifier.graphicsLayer(
-            translationX = ox,
-            translationY = oy,
-            scaleX = bs.scale,
-            scaleY = bs.scale,
-            // Hidden buttons are shown dimmed in edit mode so they can be found and re-enabled.
-            alpha = if (isHidden) 0.4f else 1f,
-        )
-    } else {
-        Modifier.then(
-            if (isHidden) Modifier.graphicsLayer(alpha = 0.4f) else Modifier,
-        )
-    }
+    val baseMod =
+        if (hasLayer) {
+            val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX + lx
+            val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY + ly
+            Modifier.graphicsLayer(
+                translationX = ox,
+                translationY = oy,
+                scaleX = bs.scale,
+                scaleY = bs.scale,
+                alpha = alpha,
+            )
+        } else if (alpha < 1f) {
+            Modifier.graphicsLayer(alpha = alpha)
+        } else {
+            Modifier
+        }
 
     val trackMod =
         if (isEditing) {

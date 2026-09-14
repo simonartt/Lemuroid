@@ -4,6 +4,27 @@
 
 ---
 
+## v1.22 - 2026-09-14
+
+### v1.20.12 触控编辑选中透明度凸显：进入编辑模式后未选中按键透明度降至 50%、选中按键保持 90% 凸显（版本升至 1.20.12-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 277 / versionName 1.20.12 / suffix -v8b**（用户需求：v1.20.10 删除了蓝色选中环后，编辑时完全无法看到"当前编辑的是哪个按键"）:
+
+1. **编辑期选中反馈改用"透明度凸显"（用户钦定方案）** — 编辑期整盘被 PadKit 模拟通道置空（无按下高亮），v1.20.10 又删了蓝色选中环，滑块/复位作用的按键无从分辨。现每个 `TweakableButton` 的 graphicsLayer alpha 改为：
+   - **选中**：0.9（保持明亮，凸显）；
+   - **未选中（可见）**：0.5（降至一半，弱化）；
+   - **未选中（隐藏）**：0.4（保留更暗，可区分"已隐藏"状态）。
+   选中来源= `viewModel.getEditingSelection()`（`selectEditTarget` 唯一权威，路由层按住按键与显隐面板格子点击两条入口都走它）。非编辑模式 alpha 不变（isHidden?0.4:1.0）。
+
+**修改文件**:
+- `lemuroid-touchinput/.../radial/layouts/MelonDS.kt` — 新增 `LocalEditingSelection`（compositionLocalOf<TouchButtonId?>）；`TweakableButton` 读 `LocalEditingSelection.current` 判选中，`graphicsLayer alpha` 由固定 `isHidden?0.4:1f` 改为"编辑选中/未选中/隐藏"三分支；`hasLayer` 判断统一（scale/offset/freeX/freeY/live 只要一个非默认即上层，否则 alpha<1 时单 alpha layer）。
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `CompositionLocalProvider` 增 `LocalEditingSelection provides editingSelection.value`（外层新增 `viewModel.getEditingSelection().collectAsState(null)`）+ import。
+- `lemuroid-app/build.gradle.kts` — versionCode 276→277、versionName 1.20.11→1.20.12。
+
+**关联**：bug1（没按住按键也拖动）与 bug2（选不中下一个按键）为 v1.20.10 的 wrapper 回归所致，v1.20.11 中央路由层（视觉圆命中+跟随已移动位置）已根治，本版仅在 v1.20.11 基础上补选中可见性；bug3 即本版。
+
+---
+
 ## v1.21 - 2026-09-05
 
 ### v1.20.11 编辑手势改中央路由层：拖动必须按在按键本体（视觉圆命中、跟随已移动位置）/ 按键不可拖出设备屏幕 / 修复 v1.20.10 编辑期副拨盘塌角度回归（版本升至 1.20.11-v8b）

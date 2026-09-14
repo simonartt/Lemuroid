@@ -99,6 +99,7 @@ import com.swordfish.lemuroid.app.shared.game.screenlayout.ScreenLayoutManager
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls
 import com.swordfish.lemuroid.app.shared.game.viewmodel.GameViewModelTouchControls.Companion.MENU_LOADING_ANIMATION_MILLIS
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager.TouchButtonId
+import com.swordfish.touchinput.radial.layouts.LocalEditingSelection
 import com.swordfish.touchinput.radial.layouts.LocalTouchEditRegistry
 import com.swordfish.touchinput.radial.layouts.TouchEditRegistry
 import com.swordfish.lemuroid.app.shared.settings.HapticFeedbackMode
@@ -189,6 +190,8 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         // hit area was the radial SLOT square (empty corners + stale position after free drags).
         val editRegistry = remember { TouchEditRegistry() }
         val inControlsEdit = editScreenLayoutShown.value && editControlsMode.value
+        // v1.20.12: current edit-target selection — drives the pad's per-button alpha highlight.
+        val editingSelection = viewModel.getEditingSelection().collectAsState(initial = null)
 
         val touchGamePads = currentControllerConfig?.getTouchControllerConfig()
         val leftGamePad = touchGamePads?.leftComposable
@@ -358,6 +361,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                         // gesture layer below consumes the actual touches).
                         CompositionLocalProvider(
                             LocalTouchEditRegistry provides if (inControlsEdit) editRegistry else null,
+                            LocalEditingSelection provides editingSelection.value,
                         ) {
                             leftGamePad?.invoke(
                                 this,
