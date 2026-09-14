@@ -4,6 +4,23 @@
 
 ---
 
+## v1.23 - 2026-09-14
+
+### v1.20.13 修复中央路由化后"拖动不跟手、松手才跳位置"：编辑期渲染改 graphicsLayer 绘制块（逐帧订阅 live 增量）（版本升至 1.20.13-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 278 / versionName 1.20.13 / suffix -v8b**（用户 v1.20.11 真机反馈：编辑期按住按键拖动时虚拟按键不跟手，拖动结束后才跳到新位置）:
+
+1. **根因（跨组合 state 订阅失效）** — v1.20.8/9 的"跟手"靠按钮**组合内 `remember` 的本地 live state**（`liveDx`），其读写在**同一组合**内，写入必然触发该按钮重组→跟手；v1.20.11 为做中央命中路由，把 live 增量挪到 `TouchEditTarget.live`（mutableStateOf），由**路由层（MobileGameScreen 的另一组合）在 pointerInput 协程里写**，按钮（PadKit 内的另一组合）读 `target.live.value`。这个**跨组合订阅实际没有触发 TweakableButton 重组** —— 于是拖动期间按钮原地不动，只有松手 `commit` 写 `bs.freeX`（走 settings state）才重组跳到最终位置，即用户看到的"松手才跳"。
+2. **修法（绘制块逐帧订阅）** — 编辑模式下 `TweakableButton` 的渲染改 `Modifier.graphicsLayer { ... }`（block/lambda 形式）：block 在**绘制层直接读 `target.live` 与 `bs.freeX`**，state 变化只让该 **layer invalidate 重绘**（不依赖跨组合重组，同动画的跟手机制），拖动每帧实时跟随。命中测试/中央路由/屏内钳制语义不变。**非编辑模式**（从不拖动）保持原"条件式低成本 layer"（scale/offset/free 才加层，避免每个按钮常驻渲染层）。v1.20.12 的透明度凸显逻辑在此 block 里一并生效（`alpha = targetAlpha`）。
+
+**修改文件**:
+- `lemuroid-touchinput/.../radial/layouts/MelonDS.kt` — `TweakableButton`：删除组合期顶层 `absorbed/lx/ly`（及其对 `graphicsLayer(参数形式)` 的求值），改 `isEditing ? graphicsLayer { block 内读 target.live + bs.freeX } : 原条件层`；局部 `alpha` 改名 `targetAlpha` 避免与 `GraphicsLayerScope.alpha` 赋值歧义。
+- `lemuroid-app/build.gradle.kts` — versionCode 277→278、versionName 1.20.12→1.20.13。
+
+**沿用（1.20.12）**：编辑期选中透明度凸显（选中 0.9 / 未选中可见 0.5 / 隐藏 0.4），`LocalEditingSelection` 提供。
+
+---
+
 ## v1.22 - 2026-09-14
 
 ### v1.20.12 触控编辑选中透明度凸显：进入编辑模式后未选中按键透明度降至 50%、选中按键保持 90% 凸显（版本升至 1.20.12-v8b）

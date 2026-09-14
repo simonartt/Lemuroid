@@ -135,39 +135,57 @@ fun PadKitScope.TweakableButton(
     // landed in bs.freeX/freeY → the live delta hands the position over seamlessly (no
     // snap-back frame, no double-move frame). v1.20.11: the delta lives on the registry target;
     // the central router writes it (see TouchEditTarget).
-    val absorbed = bs.freeX != target.dragStartFreeX || bs.freeY != target.dragStartFreeY
-    val lx = if (absorbed) 0f else target.live.value.x
-    val ly = if (absorbed) 0f else target.live.value.y
-
-    // Visual layer: freeX/freeY are PIXEL translations from free dragging (v1.20.5) and stack
-    // on top of the legacy relative offset inside the same graphicsLayer.
     // Alpha (v1.20.12): in edit mode the SELECTED button stays bright (0.9) while every other
     // button dims to 0.5 so the active edit target is obvious; hidden buttons stay extra dim so
     // they can still be told apart from normal dimmed ones. Outside edit mode: 1.0 (0.4 when hidden).
-    val alpha =
+    val targetAlpha =
         when {
             !isEditing -> if (isHidden) 0.4f else 1f
             isSelected -> 0.9f
             isHidden -> 0.4f
             else -> 0.5f
         }
-    val hasLayer = bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f ||
-        bs.freeX != 0f || bs.freeY != 0f || lx != 0f || ly != 0f
+
+    // v1.20.13 (drag-follow fix): in edit mode render through the graphicsLayer BLOCK form so the
+    // layer's draw pass reads target.live directly — a per-frame draw subscription (like an
+    // animation) that follows the finger. v1.20.11 moved the live delta from the button's own
+    // remember state to the central router's registry target; in practice the button stopped
+    // following during the drag and only snapped to place after the commit landed — because the
+    // cross-composition subscribe on target.live wasn't triggering recomposition. Reading it in
+    // the draw scope invalidates the LAYER (not the composition), so it tracks every frame.
+    // Outside edit mode the button never drags, so keep the cheap conditional layer (no live).
     val baseMod =
-        if (hasLayer) {
-            val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX + lx
-            val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY + ly
-            Modifier.graphicsLayer(
-                translationX = ox,
-                translationY = oy,
-                scaleX = bs.scale,
-                scaleY = bs.scale,
-                alpha = alpha,
-            )
-        } else if (alpha < 1f) {
-            Modifier.graphicsLayer(alpha = alpha)
+        if (isEditing) {
+            Modifier.graphicsLayer {
+                val absorbedInDraw =
+                    bs.freeX != target.dragStartFreeX || bs.freeY != target.dragStartFreeY
+                val effLx = if (absorbedInDraw) 0f else target.live.value.x
+                val effLy = if (absorbedInDraw) 0f else target.live.value.y
+                translationX = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX + effLx
+                translationY = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY + effLy
+                scaleX = bs.scale
+                scaleY = bs.scale
+                alpha = targetAlpha
+            }
         } else {
-            Modifier
+            val hasLayer =
+                bs.scale != 1.0f || bs.offsetX != 0f || bs.offsetY != 0f ||
+                    bs.freeX != 0f || bs.freeY != 0f
+            if (hasLayer) {
+                val ox = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetX + bs.freeX
+                val oy = TouchControllerSettingsManager.MAX_MARGINS * bs.offsetY + bs.freeY
+                Modifier.graphicsLayer(
+                    translationX = ox,
+                    translationY = oy,
+                    scaleX = bs.scale,
+                    scaleY = bs.scale,
+                    alpha = targetAlpha,
+                )
+            } else if (targetAlpha < 1f) {
+                Modifier.graphicsLayer(alpha = targetAlpha)
+            } else {
+                Modifier
+            }
         }
 
     val trackMod =
