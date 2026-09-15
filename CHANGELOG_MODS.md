@@ -4,6 +4,23 @@
 
 ---
 
+## v1.25 - 2026-09-15
+
+### v1.20.15 修复手动切换横/竖布局后编辑色块与真实屏幕位置不同步：布局锚改以手动布局模式为缓存键（版本升至 1.20.15-v8b）
+
+**分支 `v8b-nds-editor`，versionCode 280 / versionName 1.20.15 / suffix -v8b**（用户确认在编辑器菜单点"切换到横屏/竖屏布局"，色块显示位置与真实 split-viewport 不同步）:
+
+1. **根因（锚缓存键用物理方向，与手动布局模式脱节）** — v1.20.8 起布局几何/色块都以 `ScreenLayoutState.layoutOrientation`（手动方向）为锚，物理旋转不再影响布局。但布局锚 `viewportPosition = remember(isLandscape)` 的缓存键仍是**物理方向**。用户在编辑器手动切换布局后：`layoutOrientation` 立即变为新方向，而物理方向（activity 锁定）要到重建才翻转——切换瞬间编辑器色块已按**新 layoutOrientation** 组合，但 `viewportPosition` 仍持有**旧物理方向锚 rect**；其 `onGloballyPositioned` 冻结守卫（touchControls 隐藏时）因锚非 null 而跳过更新 → 锚始终停留在旧方向 → 色块显示与真实 split-viewport 错位且不复位。
+2. **修法** — 布局锚缓存键从物理 `isLandscape` 改为**手动布局方向** `layoutOrientationKey = screenLayoutState.layoutOrientation.name`。切换布局 → key 立即变化 → `viewportPosition` 重置为 null → `onGloballyPositioned` 冻结守卫的 null 分支立刻用**新方向锚**回填 → 编辑器色块与真实渲染共用同一锚，切换即同步。物理旋转（不再影响布局）也不会再无谓重置锚。一行缓存键变更，无其他语义改动。
+
+**修改文件**:
+- `lemuroid-app/.../mobile/feature/game/MobileGameScreen.kt` — `viewportPosition` 的 `remember(isLandscape)` 改 `remember(layoutOrientationKey)`，新增 `layoutOrientationKey` 派生。
+- `lemuroid-app/build.gradle.kts` — versionCode 279→280、versionName 1.20.14→1.20.15。
+
+**沿用**：1.20.14 slotRect 组合期读取修复；1.20.13 绘制块跟手渲染；1.20.12 选中透明度凸显。
+
+---
+
 ## v1.24 - 2026-09-14
 
 ### v1.20.14 修复"进入编辑模式后必须先点全部复位才能编辑任何按钮"：命中圆注册的 slotRect 读取提升到组合期（版本升至 1.20.14-v8b）

@@ -236,8 +236,17 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
             }
 
         val fullScreenPosition = remember { mutableStateOf<Rect?>(null) }
-        // Keyed by orientation: a rotation invalidates any previously frozen anchor rect
-        val viewportPosition = remember(isLandscape) { mutableStateOf<Rect?>(null) }
+        // The anchor rect must be keyed on the MANUAL layout mode, not the physical orientation
+        // (v1.20.8+ layouts follow layoutOrientation, never how the phone is held). Keying on the
+        // physical isLandscape kept a stale orientation's anchor alive right after the user hand-
+        // switched layout mode: the color blocks recomposed against the NEW layoutOrientation but
+        // viewportPosition still held the OLD physical anchor (and its onGloballyPositioned freeze-
+        // guard skipped the update because it was non-null) → the editor preview disagreed with the
+        // real split-viewport. Keying on the layout mode makes the anchor re-acquire immediately
+        // when the user switches 横/竖布局, so editor preview and runtime share one anchor.
+        val layoutOrientationKey =
+            screenLayoutState.value?.layoutOrientation?.name ?: (if (isLandscape) "landscape" else "portrait")
+        val viewportPosition = remember(layoutOrientationKey) { mutableStateOf<Rect?>(null) }
 
         PadKit(
             modifier = Modifier.fillMaxSize(),
